@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/site/bits";
 import { PoolPanel } from "@/components/pool/pool-panel";
+import { PoolStatus } from "@/components/pool/pool-status";
 
 export const metadata: Metadata = { title: "Backstop pool" };
 
@@ -8,8 +9,8 @@ export default function PoolPage() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
       <PageHeader eyebrow="For liquidity providers" title="Backstop pool">
-        When no trader takes an auction, the pool buys at the floor price so the user still gets paid. Anyone can deposit USDC or SOL and
-        receive pool shares.
+        When no trader takes an auction, the pool buys at the floor price so the user still gets paid. The pool is live on devnet and
+        backstopping auctions now; deposits for USDC or SOL (in return for pool shares) open from this page soon.
       </PageHeader>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
         <section aria-labelledby="risk-h" className="grid content-start gap-3 rounded-2xl border border-warning/40 bg-warning-soft p-4 text-warning-foreground sm:p-5">
@@ -25,7 +26,10 @@ export default function PoolPage() {
             <li>Devnet, unaudited, test tokens only.</li>
           </ul>
         </section>
-        <PoolPanel />
+        <div className="grid content-start gap-4">
+          <PoolStatus />
+          <PoolPanel />
+        </div>
       </div>
     </div>
   );

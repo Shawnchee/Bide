@@ -233,10 +233,20 @@ export function buildDraft(d: DraftInput): Draft {
 export interface PayoffInput {
   goal: Goal;
   strike: number; // dollars
-  size: number; // whole asset units
+  size: number; // this round's size, whole asset units
+  /** Everything the user set aside: USDC dollars (buy) or whole asset units (sell). */
+  lockTotal: number;
   premiumNet: number | null; // dollars after fee
   lendYield: number | null; // dollars, estimate
   settle: number; // dollars
+}
+
+export interface PayoffRow {
+  label: string;
+  /** Dollars at the settle price (rounded to cents so the rows add up to `endValue`). */
+  value: number;
+  /** Optional amount shown before the dollar value, e.g. "0.056 SOL". */
+  amount?: string;
 }
 
 export interface PayoffResult {
@@ -244,56 +254,93 @@ export interface PayoffResult {
   /** Plain-English lines. */
   headline: string;
   detail: string;
-  /** Value of what the user holds afterwards, in dollars at the settle price (incl. premium). */
+  /** What the user holds after this round's check, valued at the settle price. Sums to endValue. */
+  rows: PayoffRow[];
+  /** Whole plan, in dollars at the settle price (incl. what was earned). */
   endValue: number;
   /** Same capital, no plan, valued at the settle price. */
   holdValue: number;
 }
 
+const cents = (n: number) => Math.round(n * 100) / 100;
+const money = (n: number) => `$${cents(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Whole-plan payoff at one round's check: this round's size against everything set aside (the desk
+ * ladders a goal across rounds), so the totals always add up to the deposit + what was earned.
+ */
 export function payoff(p: PayoffInput, symbol: string): PayoffResult {
-  const extra = (p.premiumNet ?? 0) + (p.lendYield ?? 0);
-  const notional = p.strike * p.size;
-  if (p.goal === "sell") {
-    const filled = p.settle > p.strike;
-    const holdValue = p.size * p.settle;
-    if (filled) {
-      return {
-        filled,
-        headline: `You sell ${fmtSize(p.size)} ${symbol} at $${fmtPrice(p.strike)}`,
-        detail: `You receive $${fmtPrice(notional)} USDC and keep everything you were paid.`,
-        endValue: notional + extra,
-        holdValue,
-      };
-    }
-    return {
-      filled,
-      headline: `You keep your ${fmtSize(p.size)} ${symbol}`,
-      detail: `Nothing is sold. You keep your ${symbol} and everything you were paid.`,
-      endValue: holdValue + extra,
-      holdValue,
-    };
-  }
-  const filled = p.settle < p.strike;
-  const holdValue = notional;
-  if (filled) {
-    return {
-      filled,
-      headline: `You buy ${fmtSize(p.size)} ${symbol} at $${fmtPrice(p.strike)}`,
-      detail:
-        p.settle < p.strike * 0.85
-          ? `Even though ${symbol} is at $${fmtPrice(p.settle)}, you pay your price of $${fmtPrice(p.strike)}. You keep everything you were paid.`
-          : `You pay $${fmtPrice(notional)} and keep everything you were paid.`,
-      endValue: p.size * p.settle + extra,
-      holdValue,
-    };
-  }
-  return {
+  const earned = cents((p.premiumNet ?? 0) + (p.lendYield ?? 0));
+  const earnedRow: PayoffRow[] = earned > 0 ? [{ label: "Earned (upfront pay + interest est.)", value: earned }] : [];
+  const keepEarned = earned > 0 ? ` You also keep the ${money(earned)} you earned.` : " You also keep what you were paid.";
+  const done = (filled: boolean, headline: string, detail: string, rows: PayoffRow[], holdValue: number): PayoffResult => ({
     filled,
-    headline: `You keep your $${fmtPrice(notional)} USDC`,
-    detail: `Nothing is bought. Your USDC stays put and you keep everything you were paid.`,
-    endValue: notional + extra,
+    headline,
+    detail,
+    rows,
+    endValue: cents(rows.reduce((a, r) => a + r.value, 0)),
     holdValue,
-  };
+  });
+
+  if (p.goal === "sell") {
+    const lock = Math.max(p.lockTotal, p.size);
+    const waiting = Math.max(0, lock - p.size);
+    const laddered = waiting > lock * 0.001;
+    const holdValue = lock * p.settle;
+    if (p.settle > p.strike) {
+      const got = cents(p.size * p.strike);
+      return done(
+        true,
+        `You sell ${fmtSize(p.size)} ${symbol} at $${fmtPrice(p.strike)}`,
+        laddered
+          ? `You sell ${fmtSize(p.size)} ${symbol} at $${fmtPrice(p.strike)} for ${money(got)}; ${fmtSize(waiting)} ${symbol} keeps waiting in Jupiter Lend for the next rounds.${keepEarned}`
+          : `You receive ${money(got)} USDC.${keepEarned}`,
+        [
+          { label: "USDC from the sale", value: got },
+          ...(laddered ? [{ label: `${symbol} still waiting`, amount: `${fmtSize(waiting)} ${symbol}`, value: cents(waiting * p.settle) }] : []),
+          ...earnedRow,
+        ],
+        holdValue,
+      );
+    }
+    return done(
+      false,
+      `Nothing is sold — your ${fmtSize(lock)} ${symbol} stays in Jupiter Lend`,
+      (laddered ? `This round offers ${fmtSize(p.size)} of your ${fmtSize(lock)} ${symbol} (the desk ladders in). ` : "") +
+        `Nothing is sold, so you keep all your ${symbol}.${keepEarned} The next round starts automatically.`,
+      [{ label: `Your ${symbol}`, amount: `${fmtSize(lock)} ${symbol}`, value: cents(lock * p.settle) }, ...earnedRow],
+      holdValue,
+    );
+  }
+
+  const cost = cents(p.strike * p.size);
+  const lock = Math.max(p.lockTotal, cost);
+  const waiting = cents(Math.max(0, lock - cost));
+  const laddered = waiting >= 0.01;
+  const uses = laddered ? `This round uses ${money(cost)} of your ${money(lock)} (the desk ladders in). ` : "";
+  if (p.settle < p.strike) {
+    const crash = p.settle < p.strike * 0.85 ? ` Even though ${symbol} is at $${fmtPrice(p.settle)}, you pay your price.` : "";
+    return done(
+      true,
+      `You buy ${fmtSize(p.size)} ${symbol} at $${fmtPrice(p.strike)}`,
+      laddered
+        ? `You buy ${fmtSize(p.size)} ${symbol} at $${fmtPrice(p.strike)} with ${money(cost)}; ${money(waiting)} keeps waiting in Jupiter Lend for the next rounds.${crash}${keepEarned}`
+        : `You pay ${money(cost)}.${crash}${keepEarned}`,
+      [
+        { label: `${symbol} you bought`, amount: `${fmtSize(p.size)} ${symbol}`, value: cents(p.size * p.settle) },
+        ...(laddered ? [{ label: "USDC still waiting", value: waiting }] : []),
+        ...earnedRow,
+      ],
+      lock,
+    );
+  }
+  return done(
+    false,
+    `Nothing is bought — your ${money(lock)} stays in Jupiter Lend`,
+    `${uses}Nothing is bought this round, so your ${money(lock)} stays in Jupiter Lend.${keepEarned} The next round starts automatically.`,
+    [{ label: "Your USDC", value: lock }, ...earnedRow],
+    lock,
+  );
 }
 
 /** "$112", "$119.40", "$64,250" — cents shown only when the price has them. */

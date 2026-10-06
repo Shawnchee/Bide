@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DEFAULT_FEE_BPS, USDC_MINT, type AssetInfo } from "@/lib/constants";
 import { PROGRAM_NOT_READY } from "@/lib/bide-client";
-import { fillProbability, lendApyBps, riskSummary, runRiskAnswers, stepLabel } from "@/lib/desk";
+import { collapseSteps, fillProbability, lendApy, riskSummary, runRiskAnswers } from "@/lib/desk";
 import { dateShort, dateTimeUtc, usd } from "@/lib/format";
 import { afterFee, fmtPrice, fmtSize, type Draft, type Goal } from "@/lib/plan-math";
 import { planPda } from "@bide/shared";
@@ -19,6 +19,7 @@ import type { Patience } from "@/lib/types";
 import { useDeskPreview } from "@/hooks/use-desk-preview";
 import { useTokenBalance } from "@/hooks/use-token-balance";
 import { useNow } from "@/hooks/use-now";
+import { useLendReferenceApy } from "@/hooks/use-lend-reference";
 import { WalletButton } from "@/components/site/wallet-button";
 import { ExplorerLink } from "@/components/site/bits";
 import { useProgram } from "@/hooks/use-program";
@@ -36,7 +37,7 @@ interface Props {
 }
 
 export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spot, onBack }: Props) {
-  const { state, run } = useDeskPreview();
+  const { state, run, retry } = useDeskPreview();
   const { connection } = useConnection();
   const { publicKey, sendTransaction } = useWallet();
   const router = useRouter();
@@ -88,7 +89,6 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
   const roundSize = proposal?.size ? Number(proposal.size) / 10 ** asset.decimals : null;
   const checkAt = proposal?.expiry ?? null;
   const prob = fillProbability(data?.memo ?? null);
-  const apyBps = lendApyBps(data?.memo ?? null);
   const risk = data ? riskSummary(runRiskAnswers({ memo: data.memo, verdict: null })) : null;
 
   const strike = Number(draft.args.targetStrike) / 1e6;
@@ -97,12 +97,17 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
   const lockLabel = draft.lockIsUsdc ? `${fmtPrice(lockWhole)} USDC` : `${fmtSize(lockWhole)} ${asset.symbol}`;
   const buy = goal !== "sell";
   const checkText = checkAt ? dateTimeUtc(checkAt) : draft.args.quick ? "the end of each 10-minute round" : "08:00 UTC on each round's end date";
-  // Interest estimate for this round only, from the desk's lend_apy tool (null if unknown).
+  // Interest estimate on everything set aside, until this round's check: the desk's lend_apy trace
+  // (devnet on-chain rate, else Jupiter's mainnet reference), else the worker's cached mainnet reference.
+  const deskApy = lendApy(data?.memo ?? null);
+  const refApyBps = useLendReferenceApy(draft.lockIsUsdc ? "USDC" : "SOL");
+  const apy = deskApy && (draft.lockIsUsdc || deskApy.source === "devnet") ? deskApy : refApyBps !== null ? { bps: refApyBps, source: "mainnet reference" as const } : null;
   const lockedUsd = draft.lockIsUsdc ? lockWhole : spot ? lockWhole * spot : null;
   const lendYieldEst =
-    apyBps !== null && checkAt && nowSec && lockedUsd !== null
-      ? (lockedUsd * (apyBps / 10_000) * Math.max(0, checkAt - nowSec)) / (365 * 86400)
+    apy !== null && checkAt && nowSec && lockedUsd !== null
+      ? (lockedUsd * (apy.bps / 10_000) * Math.max(0, checkAt - nowSec)) / (365 * 86400)
       : null;
+  const lendNote = apy ? `${(apy.bps / 100).toFixed(2)}% APY${apy.source === "devnet" ? "" : ", Jupiter mainnet reference"}` : null;
 
   const balanceShort =
     publicKey &&
@@ -152,25 +157,26 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
               {data?.memoHash && <span className="truncate font-mono text-[11px] text-muted-foreground">memo {data.memoHash.slice(0, 10)}…</span>}
             </div>
             {state.status === "error" && (
-              <div className="mt-4 flex items-start gap-3 rounded-xl bg-warning-soft p-4 text-sm text-warning-foreground">
+              <div className="mt-4 flex items-start gap-3 rounded-xl bg-warning-soft p-4 text-sm text-warning-foreground" role="alert">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-                <p>{state.message}</p>
+                <p className="min-w-0 flex-1">{state.message}</p>
+                <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 rounded-full" onClick={retry}>
+                  Retry
+                </Button>
               </div>
             )}
             {data && data.steps.length > 0 && (
               <ol className="mt-4 grid gap-2" aria-live="polite">
-                {data.steps
-                  .filter((s) => s.step !== "start")
-                  .map((s, i, arr) => {
+                {collapseSteps(data.steps).map((s, i, arr) => {
                     const last = i === arr.length - 1 && state.status === "running";
                     return (
-                      <li key={`${s.step}-${i}`} className="flex items-start gap-2.5 text-sm animate-in fade-in-0 slide-in-from-bottom-1 duration-300">
+                      <li key={s.key} className="flex items-start gap-2.5 text-sm animate-in fade-in-0 slide-in-from-bottom-1 duration-300">
                         {last ? (
                           <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
                         ) : (
                           <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
                         )}
-                        <span className={last ? "text-foreground" : "text-muted-foreground"}>{stepLabel(s)}</span>
+                        <span className={last ? "text-foreground" : "text-muted-foreground"}>{s.label}</span>
                       </li>
                     );
                   })}
@@ -186,7 +192,10 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
             {state.status === "done" && data?.status === "error" && !data.final && (
               <div className="mt-4 flex items-start gap-3 rounded-xl bg-warning-soft p-4 text-sm text-warning-foreground">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-                <p>The desk couldn&apos;t price this right now. You can still start the plan — the desk prices each round when it opens.</p>
+                <p className="min-w-0 flex-1">The desk couldn&apos;t price this right now. You can still start the plan — the desk prices each round when it opens.</p>
+                <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 rounded-full" onClick={retry}>
+                  Retry
+                </Button>
               </div>
             )}
             {state.status === "done" && data?.final && (
@@ -277,8 +286,10 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
             symbol={asset.symbol}
             strike={strike}
             size={roundSize ?? sizeTotal}
+            lockTotal={lockWhole}
             premiumNet={floorNet}
             lendYield={lendYieldEst}
+            lendNote={lendNote}
             checkAt={checkAt}
             spot={spot}
           />

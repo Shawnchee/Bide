@@ -11,19 +11,23 @@ interface Props {
   symbol: string;
   strike: number;
   size: number;
+  /** Everything set aside: USDC dollars (buy) or whole asset units (sell). */
+  lockTotal: number;
   premiumNet: number | null;
   lendYield: number | null;
+  /** e.g. "4.01% APY, Jupiter mainnet reference" — shown under the interest estimate. */
+  lendNote: string | null;
   checkAt: number | null;
   spot: number | null;
 }
 
 /** "If SOL ends at $X on <date>, you get …" — pure code (SPEC §4 feature 8). */
-export function PayoffSlider({ goal, symbol, strike, size, premiumNet, lendYield, checkAt, spot }: Props) {
+export function PayoffSlider({ goal, symbol, strike, size, lockTotal, premiumNet, lendYield, lendNote, checkAt, spot }: Props) {
   const lo = Math.max(1, Math.floor(strike * 0.6));
   const hi = Math.ceil(strike * 1.4);
   const [settle, setSettle] = useState(() => Math.round(spot && spot >= lo && spot <= hi ? spot : strike));
   if (!strike || !size) return null;
-  const r = payoff({ goal, strike, size, premiumNet, lendYield, settle }, symbol);
+  const r = payoff({ goal, strike, size, lockTotal, premiumNet, lendYield, settle }, symbol);
   const when = checkAt ? `on ${dateShort(checkAt)}` : "at the check";
 
   return (
@@ -31,7 +35,7 @@ export function PayoffSlider({ goal, symbol, strike, size, premiumNet, lendYield
       <h2 id="payoff-h" className="text-sm font-semibold">
         Try a price
       </h2>
-      <p className="mt-0.5 text-xs text-muted-foreground">Drag to see what you&apos;d end up with for this round.</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">Drag to see where your whole plan stands after this round&apos;s check.</p>
 
       <div className="mt-4 grid gap-3 rounded-xl bg-secondary p-4">
         <p className="text-[15px]">
@@ -58,18 +62,37 @@ export function PayoffSlider({ goal, symbol, strike, size, premiumNet, lendYield
         <p className="text-[13px] opacity-85">{r.detail}</p>
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
+      <dl className="mt-4 grid grid-cols-2 gap-3 text-xs">
         <div>
           <dt className="text-muted-foreground">Paid to you upfront</dt>
           <dd className="num mt-0.5 text-sm font-semibold text-foreground">{premiumNet !== null ? usd(premiumNet) : "set at auction"}</dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Lend interest (est.)</dt>
-          <dd className="num mt-0.5 text-sm font-semibold text-foreground">{lendYield !== null ? usd(lendYield) : "—"}</dd>
+          {lendYield !== null ? (
+            <dd className="mt-0.5">
+              <span className="num text-sm font-semibold text-foreground">{usd(lendYield)}</span>
+              {lendNote && <span className="mt-0.5 block text-[11px] text-muted-foreground">{lendNote}</span>}
+            </dd>
+          ) : (
+            <dd className="mt-0.5 text-sm text-foreground">earns Jupiter Lend interest</dd>
+          )}
         </div>
-        <div className="col-span-2 sm:col-span-1">
-          <dt className="text-muted-foreground">Worth at ${fmtPrice(settle)}</dt>
-          <dd className="num mt-0.5 text-sm font-semibold text-foreground">{usd(r.endValue)}</dd>
+      </dl>
+
+      <dl className="mt-4 grid gap-1.5 border-t border-border pt-3 text-[13px]">
+        {r.rows.map((row) => (
+          <div key={row.label} className="flex items-baseline justify-between gap-3">
+            <dt className="text-muted-foreground">
+              {row.label}
+              {row.amount && <span className="num"> · {row.amount}</span>}
+            </dt>
+            <dd className="num text-foreground">{usd(row.value)}</dd>
+          </div>
+        ))}
+        <div className="flex items-baseline justify-between gap-3 border-t border-border pt-1.5">
+          <dt className="font-medium">Your plan at ${fmtPrice(settle)}</dt>
+          <dd className="num text-sm font-semibold">{usd(r.endValue)}</dd>
         </div>
       </dl>
       {premiumNet === null && (

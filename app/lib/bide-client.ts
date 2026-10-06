@@ -53,6 +53,24 @@ export interface DecodedPlan {
   status: "active" | "filled" | "closed";
 }
 
+/** On-chain backstop pool: caps + vault balances (whole tokens). */
+export interface DecodedPool {
+  pubkey: string;
+  paused: boolean;
+  maxPremiumBpsOfNotional: number;
+  maxOpenNotional: number; // USDC
+  maxUtilizationBps: number;
+  spendWindowSecs: number;
+  spendWindowCap: number; // USDC
+  spendWindowSpent: number; // USDC
+  openNotional: number; // USDC
+  usdcVault: number; // USDC sitting in the pool vault
+  lendFTokens: number; // Jupiter Lend fToken shares (≈ USDC; exchange rate slightly above 1)
+  wsolVault: number; // WSOL
+  reservedUsdc: number;
+  reservedWsol: number;
+}
+
 export interface BideProgramClient {
   /** create_plan (+ any Lend remaining accounts). Compute budget / WSOL wrap are added by lib/tx.ts. */
   createPlanIxs(p: { conn: Connection; owner: PublicKey; asset: AssetInfo; args: CreatePlanArgs }): Promise<TransactionInstruction[]>;
@@ -67,6 +85,8 @@ export interface BideProgramClient {
   fetchStrikeTick(conn: Connection, mint: PublicKey): Promise<bigint | null>;
   /** Config.fee_bps from chain. */
   fetchFeeBps(conn: Connection): Promise<number>;
+  /** Pool account + vault balances (null if the pool isn't initialised). */
+  fetchPool(conn: Connection): Promise<DecodedPool | null>;
 }
 
 let cached: { conn: Connection; client: BideProgramClient } | null = null;
@@ -181,6 +201,36 @@ function makeClient(conn: Connection): BideProgramClient {
     async fetchFeeBps() {
       const cfg = await bide.fetchConfig();
       return cfg.feeBps;
+    },
+    async fetchPool(c) {
+      const a = bide.poolAccounts();
+      const p = await bide.program.account.pool.fetchNullable(a.pool);
+      if (!p) return null;
+      const bal = async (ata: PublicKey) => {
+        try {
+          return (await c.getTokenAccountBalance(ata, "confirmed")).value.uiAmount ?? 0;
+        } catch {
+          return 0;
+        }
+      };
+      const [usdcVault, wsolVault, lendFTokens] = await Promise.all([bal(a.poolUsdc), bal(a.poolWsol), bal(a.poolFToken)]);
+      const usdc6 = (v: { toString(): string }) => Number(big(v)) / 1e6;
+      return {
+        pubkey: a.pool.toBase58(),
+        paused: Boolean(p.paused),
+        maxPremiumBpsOfNotional: Number(p.maxPremiumBpsOfNotional),
+        maxOpenNotional: usdc6(p.maxOpenNotional),
+        maxUtilizationBps: Number(p.maxUtilizationBps),
+        spendWindowSecs: Number(p.spendWindowSecs),
+        spendWindowCap: usdc6(p.spendWindowCap),
+        spendWindowSpent: usdc6(p.spendWindowSpent),
+        openNotional: usdc6(p.openNotional),
+        usdcVault,
+        lendFTokens,
+        wsolVault,
+        reservedUsdc: usdc6(p.reservedUsdc),
+        reservedWsol: Number(big(p.reservedWsol)) / 1e9,
+      };
     },
   };
 }

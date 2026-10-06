@@ -106,9 +106,16 @@ export function fillProbability(memo: Record<string, unknown> | null): number | 
 }
 
 export function lendApyBps(memo: Record<string, unknown> | null): number | null {
+  return lendApy(memo)?.bps ?? null;
+}
+
+/** Lend APY from the desk's lend_apy trace: devnet on-chain rate if known, else Jupiter's mainnet reference. */
+export function lendApy(memo: Record<string, unknown> | null): { bps: number; source: "devnet" | "mainnet reference" } | null {
   const t = runToolTraces(memo).filter((x) => x.name === "lend_apy" && x.ok !== false);
   const r = t[t.length - 1]?.result as { devnet_apy_bps?: number | null; mainnet_reference_apy_bps?: number | null } | undefined;
-  return r?.devnet_apy_bps ?? r?.mainnet_reference_apy_bps ?? null;
+  if (typeof r?.devnet_apy_bps === "number") return { bps: r.devnet_apy_bps, source: "devnet" };
+  if (typeof r?.mainnet_reference_apy_bps === "number") return { bps: r.mainnet_reference_apy_bps, source: "mainnet reference" };
+  return null;
 }
 
 export const ERROR_EXPLAIN: Record<string, string> = {
@@ -128,4 +135,48 @@ export function explainError(code: string | null | undefined): string | null {
   if (!code) return null;
   for (const [k, v] of Object.entries(ERROR_EXPLAIN)) if (code.includes(k)) return v;
   return null;
+}
+
+/** Repeated calls to the same tool, phrased per tool ("Compared prices across exchanges (2 expiries)"). */
+const REPEAT_NOUN: Record<string, string> = {
+  venue_dispersion: "expiries",
+  price_grid: "expiries",
+  fill_probability: "prices",
+  spot_moves: "windows",
+};
+
+export interface StepRow {
+  key: string;
+  label: string;
+}
+
+/**
+ * Display list for a live desk run: drops "start" and folds repeat tool calls into the first one, so
+ * "Read the plan's limits" shows once and "Compared prices across exchanges" becomes "(2 expiries)".
+ * Display only — the worker's step stream (and /desk's audit view) stay raw.
+ */
+export function collapseSteps(steps: DeskStep[]): StepRow[] {
+  const rows: (StepRow & { tool?: string; count: number })[] = [];
+  const byTool = new Map<string, number>();
+  steps.forEach((s, i) => {
+    if (s.step === "start") return;
+    if (s.step === "tool_call") {
+      const name = String(s.detail?.name ?? s.detail?.tool ?? "");
+      const at = byTool.get(name);
+      if (at !== undefined) {
+        rows[at].count += 1;
+        return;
+      }
+      byTool.set(name, rows.length);
+      rows.push({ key: `tool-${name}-${i}`, label: stepLabel(s), tool: name, count: 1 });
+      return;
+    }
+    const label = stepLabel(s);
+    if (rows.length && rows[rows.length - 1].label === label) return;
+    rows.push({ key: `${s.step}-${i}`, label, count: 1 });
+  });
+  return rows.map(({ key, label, tool, count }) => {
+    const noun = tool ? REPEAT_NOUN[tool] : undefined;
+    return { key, label: count > 1 && noun ? `${label} (${count} ${noun})` : label };
+  });
 }

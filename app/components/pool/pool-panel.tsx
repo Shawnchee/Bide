@@ -27,6 +27,7 @@ export function PoolPanel() {
   const [busy, setBusy] = useState(false);
   const [sig, setSig] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const builderReady = mode === "deposit" ? Boolean(client?.poolDepositIxs) : Boolean(client?.poolWithdrawIxs);
   const bal = useTokenBalance(mint === "USDC" ? USDC_MINT : WSOL_MINT, nonce);
 
   const submit = async (e: React.FormEvent) => {
@@ -101,13 +102,15 @@ export function PoolPanel() {
       {!publicKey ? (
         <WalletButton size="lg" className="h-12 w-full rounded-xl text-base" />
       ) : (
-        <Button type="submit" size="lg" className="h-12 w-full rounded-xl text-base" disabled={!client?.poolDepositIxs || busy}>
+        <Button type="submit" size="lg" className="h-12 w-full rounded-xl text-base" disabled={!builderReady || busy}>
           {busy && <Loader2 className="animate-spin" aria-hidden />}
-          {mode === "deposit" ? "Deposit" : "Withdraw"}
+          {!builderReady ? `${mode === "deposit" ? "Deposits" : "Withdrawals"} from the app — coming soon` : mode === "deposit" ? "Deposit" : "Withdraw"}
         </Button>
       )}
-      {!client?.poolDepositIxs && (
-        <p className="text-xs text-muted-foreground">Pool deposits open with the next program upgrade (the pool instructions are deployed but not enabled yet).</p>
+      {!builderReady && (
+        <p className="text-xs text-muted-foreground">
+          The pool is live on devnet and already backstopping auctions. {mode === "deposit" ? "Depositing" : "Withdrawing"} from this page is coming soon.
+        </p>
       )}
       {sig && <ExplorerLink sig={sig}>View transaction</ExplorerLink>}
     </form>
