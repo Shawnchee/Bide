@@ -44,7 +44,7 @@ export function AuctionTape() {
       <table className="data-table min-w-[60rem]">
         <thead>
           <tr>
-            {["Opened", "Round", "Start", "Floor", "Exchange fair value", "Winning bid", "Winner", "Fee", "Status"].map((h, i) => (
+            {["Opened", "Round", "Start", "Floor", "Paid by maker (gross)", "Plan owner got (after 10% fee)", "Winner", "Fee", "Status"].map((h, i) => (
               <th key={h} scope="col" className={[2, 3, 4, 5, 7].includes(i) ? "text-right" : undefined}>
                 {h}
               </th>
@@ -54,6 +54,7 @@ export function AuctionTape() {
         <tbody className="num">
           {rounds.rows.map((r) => {
             const fee = toBig(r.fee_paid);
+            const gross = r.premium_paid != null ? toBig(r.premium_paid) : null;
             const rb = bidsByRound.get(r.round_pubkey) ?? [];
             return (
               <Fragment key={r.round_pubkey}>
@@ -66,8 +67,8 @@ export function AuctionTape() {
                 </td>
                 <td className="text-right">{r.premium_start != null ? usdc(r.premium_start) : "—"}</td>
                 <td className="text-right">{r.premium_floor != null ? usdc(r.premium_floor) : "—"}</td>
-                <td className="text-right text-muted-foreground">{r.cex_fair_premium != null ? usdc(r.cex_fair_premium) : "—"}</td>
-                <td className="text-right font-semibold">{r.premium_paid != null ? usdc(r.premium_paid) : "—"}</td>
+                <td className="text-right">{r.premium_paid != null ? usdc(r.premium_paid) : "—"}</td>
+                <td className="text-right font-semibold">{gross !== null && fee !== null ? usdc(gross - fee) : "—"}</td>
                 <td className="font-sans whitespace-nowrap">
                   <Winner r={r} />
                 </td>

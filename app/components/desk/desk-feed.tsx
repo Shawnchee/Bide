@@ -17,8 +17,19 @@ import { proposalLine, RunDetail } from "./run-detail";
 type Filter = "all" | "rejected" | "opened" | "held";
 const WINDOW_H = 24;
 
+/** A real rejection = the program returned an error code on a tx that landed (has a signature). */
+function isOnchainRejection(r: DeskRunRow): boolean {
+  return (r.status ?? "").toLowerCase() === "rejected" && !!r.error_code && !!r.tx_sig && !OFFCHAIN_CODES.has(r.error_code);
+}
+const OFFCHAIN_CODES = new Set(["WindowMissed", "EpochNotFound", "Transient"]);
+
 function classify(r: DeskRunRow): { label: string; tone: "reject" | "open" | "hold" | "neutral" } {
-  if (r.error_code) return { label: "Rejected on-chain", tone: "reject" };
+  if (isOnchainRejection(r)) return { label: "Rejected on-chain", tone: "reject" };
+  if (r.error_code === "WindowMissed") return { label: "Missed window", tone: "hold" };
+  if (r.error_code === "EpochNotFound") return { label: "Skipped (no epoch)", tone: "hold" };
+  if (r.error_code === "Transient" || (r.status ?? "").toLowerCase() === "submit_failed") return { label: "Skipped (send failed)", tone: "hold" };
+  if (r.error_code === "WorkerRestart") return { label: "Interrupted (restart)", tone: "hold" };
+  if (r.error_code) return { label: "Not sent", tone: "hold" };
   const s = (r.final?.status ?? r.status ?? "").toLowerCase();
   if (r.tx_sig && s === "open") return { label: "Round opened", tone: "open" };
   if (s === "open") return { label: r.kind === "preview" ? "Preview" : "Proposed", tone: "neutral" };
@@ -38,7 +49,7 @@ export function DeskFeed() {
   const rejections = useMemo(() => {
     // eslint-disable-next-line react-hooks/purity -- relative window, recomputed with each data refresh
     const since = Date.now() - WINDOW_H * 3600_000;
-    return rows.filter((r) => r.error_code && Date.parse(r.created_at) >= since).length;
+    return rows.filter((r) => isOnchainRejection(r) && Date.parse(r.created_at) >= since).length;
   }, [rows]);
 
   const shown = rows.filter((r) => {
@@ -59,7 +70,7 @@ export function DeskFeed() {
           </p>
           <p className="mt-2 text-xs text-muted-foreground">
             in the last {WINDOW_H} h. The AI is allowed to try; the Solana program decides. The prompt doesn&apos;t forbid out-of-bounds
-            proposals and Risk never sees the user&apos;s limits — so these are genuine.
+            proposals and Risk is given no plan bounds directly. Only landed transactions the program rejected count here; missed windows and skipped sends are listed separately.
           </p>
         </div>
         <div className="grid content-center gap-2 bg-card p-4 text-[13px] sm:p-5">

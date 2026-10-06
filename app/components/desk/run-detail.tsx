@@ -86,7 +86,7 @@ export function RunDetail({ run, trigger, onChainMemoHash }: { run: DeskRunRow; 
             )}
             {run.error_code && (
               <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-                Rejected on-chain: <span className="font-mono text-xs">{run.error_code}</span>
+                {run.status === "rejected" && run.tx_sig ? "Rejected on-chain" : "Not sent (off-chain)"}: <span className="font-mono text-xs">{run.error_code}</span>
                 {explainError(run.error_code) ? ` — ${explainError(run.error_code)}.` : ""}
               </p>
             )}
