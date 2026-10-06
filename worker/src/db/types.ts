@@ -38,7 +38,6 @@ export interface IntakeRunRow {
   model?: string | null; error?: string | null; latency_ms?: number | null; created_at?: string; updated_at?: string;
 }
 
-export interface TelegramLinkRow { wallet: string; chat_id: number; plan_pubkey?: string | null }
 
 export interface Repo {
   readonly backend: "supabase" | "memory";
@@ -54,8 +53,6 @@ export interface Repo {
   /** Merge one signature into rounds.sigs (e.g. { take: sig }). */
   addRoundSig(round: string, label: string, sig: string): Promise<void>;
   upsertEpochs(rows: EpochRow[]): Promise<void>;
-  upsertTelegramLink(l: TelegramLinkRow): Promise<void>;
-  telegramChatsFor(wallet: string): Promise<number[]>;
   getReference(key: string): Promise<{ value: unknown; updated_at: string } | null>;
   setReference(key: string, value: unknown): Promise<void>;
   // ---- AI agents (20261006090000_agents.sql) ----

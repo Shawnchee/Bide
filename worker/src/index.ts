@@ -1,4 +1,4 @@
-// bide-worker entrypoint: pricer, Jupiter reference, keeper, makers, mirror, notify, HTTP.
+// bide-worker entrypoint: pricer, Jupiter reference, keeper, makers, mirror, HTTP.
 import { serve } from "@hono/node-server";
 import { PublicKey } from "@solana/web3.js";
 import { cfg, envReport } from "./config.js";
@@ -24,7 +24,6 @@ import { Mirror } from "./loops/mirror.js";
 import { Scheduler } from "./loops/scheduler.js";
 import { Makers } from "./makers/index.js";
 import { topUpWsol } from "./makers/wsol.js";
-import { Notifier } from "./notify/telegram.js";
 import { Pricer } from "./pricer/index.js";
 
 const log = logger("main");
@@ -49,7 +48,6 @@ deskTools.setOutcomeSource(repo, () => makerNames);
 let desk: Desk | null = null;
 try { desk = createDeskFromEnv(deskTools, process.env, deskCfg, (t) => llmQueue.wrap(t, PRIORITY.desk)); } catch (e) { log.warn("desk unavailable", { err: (e as Error).message }); }
 
-const notifier = new Notifier(repo, async (plan) => (await snapshots.get().catch(() => null))?.plans.find((p) => p.pubkey === plan)?.owner ?? null);
 const sched = new Scheduler();
 
 // Pricer every 10 s; write a reference quote row (SOL put spot−5%, next Friday) every 60 s.
@@ -70,7 +68,6 @@ sched.add("pricer", 10_000, async () => {
   });
 }, { watchdogMs: 60_000 });
 sched.add("jupiter", 60_000, async () => { await jupiter.refresh(); }, { initialDelayMs: 3_000 });
-if (notifier.enabled) sched.add("telegram", 1_000, () => notifier.pollOnce());
 
 // Chain-dependent loops start once PROGRAM_ID + IDL are available (re-checked every 60 s).
 let chainLoopsStarted = false;
@@ -118,7 +115,7 @@ async function tryStartChain() {
   } else log.warn("makers off", { enableMakers: cfg.enableMakers, count: makerKeys.length });
 }
 // Maker P&L ledger: settlement value − premium paid, written when a maker-taken round resolves.
-const mirror = new Mirror(snapshots, repo, (e) => notifier.notify(e), async (o) => {
+const mirror = new Mirror(snapshots, repo, async (o) => {
   const r = o.round;
   const pnl = makerPnl({ kind: r.kind, strike: r.strike, size: r.size, settlePrice: o.settlePrice, exercised: o.exercised, premiumPaid: r.premiumPaid }, o.assetDecimals);
   await repo.setMakerBidPnl(r.pubkey, r.maker!, pnl.toString());
@@ -129,7 +126,7 @@ sched.add("chain-init", 60_000, async () => { await tryStartChain(); if (chainLo
 const intake = agentCfg.intakeEnabled
   ? new IntakeService({ repo, transport: llmQueue.wrap(zai, PRIORITY.intake), model: agentCfg.model, timeoutMs: agentCfg.intakeTimeoutMs, maxPerMinute: agentCfg.intakeMaxPerMinute, quickEnabled: cfg.quickPlansEnabled, spot: () => pricer.get("SOL")?.spot?.price ?? null })
   : null;
-const app = buildApp({ pricer, repo, desk, deskTools, intake, loopStats: () => sched.stats(), status: () => ({ chain: chainStatus, telegram: notifier.enabled, agents: { makerLlm: agentCfg.makerLlm, intake: !!intake, llmQueue: llmQueue.stats } }) });
+const app = buildApp({ pricer, repo, desk, deskTools, intake, loopStats: () => sched.stats(), status: () => ({ chain: chainStatus, agents: { makerLlm: agentCfg.makerLlm, intake: !!intake, llmQueue: llmQueue.stats } }) });
 serve({ fetch: app.fetch, port: cfg.port, hostname: process.env.HOST ?? "127.0.0.1" }, (i) => log.info("http listening", { port: i.port }));
 
 // Host-suspension detector: on a laptop, sleep freezes every timer (run #2 saw a 5-min clamshell sleep mid-loop).

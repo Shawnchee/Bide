@@ -21,7 +21,6 @@ export const cfg = {
   hermesUrl: env("HERMES_URL") ?? "https://hermes.pyth.network",
   hermesBetaUrl: env("HERMES_BETA_URL") ?? "https://hermes-beta.pyth.network",
   pythHermesApiKey: env("PYTH_HERMES_API_KEY"),
-  telegramBotToken: env("TELEGRAM_BOT_TOKEN"),
   jupApiKey: env("JUP_API_KEY"),
   supabaseUrl: env("SUPABASE_URL"),
   supabaseServiceKey: env("SUPABASE_SERVICE_KEY"),
@@ -37,7 +36,7 @@ export const cfg = {
 export const KEYPAIR_ENVS = ["KEEPER_KEYPAIR", "MAKER1_KEYPAIR", "MAKER2_KEYPAIR", "MAKER3_KEYPAIR"] as const;
 
 const REPORTED = [
-  "HELIUS_RPC_URL", "PROGRAM_ID", "USDC_MINT", "PYTH_HERMES_API_KEY", "TELEGRAM_BOT_TOKEN", "JUP_API_KEY",
+  "HELIUS_RPC_URL", "PROGRAM_ID", "USDC_MINT", "PYTH_HERMES_API_KEY", "JUP_API_KEY",
   "SUPABASE_URL", "SUPABASE_SERVICE_KEY", "WORKER_SHARED_SECRET", "QUICK_PLANS_ENABLED", ...KEYPAIR_ENVS,
 ];
 export function envReport(): Record<string, "SET" | "EMPTY"> {

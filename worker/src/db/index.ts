@@ -22,7 +22,7 @@ export function getRepo(): Repo {
 /** Tables the SupabaseRepo writes (supabase/migrations/20261005150000_init.sql). */
 // The agents tables come from 20261006090000_agents.sql, which also adds rounds.asset/auction_secs/pool_delay_secs that
 // roundRow() writes — so an un-migrated project must fall back to memory rather than fail every rounds upsert.
-export const REQUIRED_TABLES = ["quotes", "desk_runs", "plans", "rounds", "epochs", "telegram_links", "reference_data", "maker_stances", "maker_bids", "intake_runs"] as const;
+export const REQUIRED_TABLES = ["quotes", "desk_runs", "plans", "rounds", "epochs", "reference_data", "maker_stances", "maker_bids", "intake_runs"] as const;
 
 /**
  * Call once at startup, before getRepo(). With Supabase configured, probe every required table; if any is missing

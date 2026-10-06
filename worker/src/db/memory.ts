@@ -1,6 +1,6 @@
 // In-process Repo: used until SUPABASE_URL is set (same interface, no other code changes on switch).
 import { randomUUID } from "node:crypto";
-import type { DeskRunRow, EpochRow, IntakeRunRow, MakerBidRow, MakerStanceRow, PlanRow, QuoteRow, Repo, RoundRow, TelegramLinkRow } from "./types.js";
+import type { DeskRunRow, EpochRow, IntakeRunRow, MakerBidRow, MakerStanceRow, PlanRow, QuoteRow, Repo, RoundRow } from "./types.js";
 
 const MAX_QUOTES = 2000;
 const now = () => new Date().toISOString();
@@ -12,7 +12,6 @@ export class MemoryRepo implements Repo {
   plans = new Map<string, PlanRow>();
   rounds = new Map<string, RoundRow>();
   epochs = new Map<string, EpochRow>();
-  links: TelegramLinkRow[] = [];
   ref = new Map<string, { value: unknown; updated_at: string }>();
   stances: MakerStanceRow[] = [];
   makerBids: MakerBidRow[] = [];
@@ -28,8 +27,6 @@ export class MemoryRepo implements Repo {
   async upsertRounds(rows: RoundRow[]) { for (const r of rows) this.rounds.set(r.round_pubkey, { ...r, sigs: { ...(this.rounds.get(r.round_pubkey)?.sigs ?? {}), ...(r.sigs ?? {}) }, updated_at: now() }); }
   async addRoundSig(round: string, label: string, sig: string) { const r = this.rounds.get(round); if (r) r.sigs = { ...(r.sigs ?? {}), [label]: sig }; }
   async upsertEpochs(rows: EpochRow[]) { for (const r of rows) this.epochs.set(r.epoch_pubkey, { ...r, updated_at: now() }); }
-  async upsertTelegramLink(l: TelegramLinkRow) { if (!this.links.some((x) => x.wallet === l.wallet && x.chat_id === l.chat_id)) this.links.push(l); }
-  async telegramChatsFor(wallet: string) { return this.links.filter((l) => l.wallet === wallet).map((l) => l.chat_id); }
   async getReference(key: string) { return this.ref.get(key) ?? null; }
   async setReference(key: string, value: unknown) { this.ref.set(key, { value, updated_at: now() }); }
 

@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { DeskRunRow, EpochRow, IntakeRunRow, MakerBidRow, MakerStanceRow, PlanRow, QuoteRow, Repo, RoundRow, TelegramLinkRow } from "./types.js";
+import type { DeskRunRow, EpochRow, IntakeRunRow, MakerBidRow, MakerStanceRow, PlanRow, QuoteRow, Repo, RoundRow } from "./types.js";
 
 function check<T>(res: { data: T; error: { message: string } | null }, what: string): T {
   if (res.error) throw new Error(`supabase ${what}: ${res.error.message}`);
@@ -52,11 +52,6 @@ export class SupabaseRepo implements Repo {
     check(await this.db.from("rounds").update({ sigs: { ...(cur.sigs ?? {}), [label]: sig } }).eq("round_pubkey", round), "add sig");
   }
   async upsertEpochs(rows: EpochRow[]) { if (rows.length) check(await this.db.from("epochs").upsert(rows.map((r) => ({ ...r, updated_at: new Date().toISOString() }))), "upsert epochs"); }
-  async upsertTelegramLink(l: TelegramLinkRow) { check(await this.db.from("telegram_links").upsert(l), "upsert telegram link"); }
-  async telegramChatsFor(wallet: string) {
-    const d = check(await this.db.from("telegram_links").select("chat_id").eq("wallet", wallet), "telegram chats") as { chat_id: number }[];
-    return d.map((x) => Number(x.chat_id));
-  }
   async getReference(key: string) { return check(await this.db.from("reference_data").select("value, updated_at").eq("key", key).maybeSingle(), "get ref") as any; }
   async setReference(key: string, value: unknown) { check(await this.db.from("reference_data").upsert({ key, value, updated_at: new Date().toISOString() }), "set ref"); }
 

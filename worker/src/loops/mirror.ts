@@ -1,13 +1,19 @@
-// Mirrors plans/rounds/epochs to the DB and emits notify events from state transitions.
+// Mirrors plans/rounds/epochs to the DB and logs plan events derived from state transitions.
 // Round accounts are CLOSED on Cancelled / not-exercised / Settled / Unwound, so a vanished round's final
 // status is inferred from its last known state (and the epoch).
 import type { SnapshotCache } from "../chain/snapshot-cache.js";
 import type { ChainSnapshot, RoundState } from "../chain/types.js";
 import { epochRow, planRow, roundRow, type Repo } from "../db/index.js";
 import { logger } from "../log.js";
-import type { NotifyEvent } from "../notify/telegram.js";
 
 const log = logger("mirror");
+
+/** Plan lifecycle events derived from consecutive snapshots (logged; no external notifications). */
+export type PlanEvent =
+  | { type: "RoundTaken"; plan: string; owner: string; round: string; premiumUsdc: number; feeUsdc: number; isPool: boolean }
+  | { type: "RoundResolved"; plan: string; owner: string; round: string; exercised: boolean; settlePriceUsd: number; strikeUsd: number }
+  | { type: "PlanFlipped"; plan: string; owner: string }
+  | { type: "PlanExpired"; plan: string; owner: string };
 
 export function inferClosedStatus(last: RoundState, s: ChainSnapshot): RoundState["status"] {
   const ep = s.epochs.find((e) => e.pubkey === last.epoch);
@@ -17,9 +23,9 @@ export function inferClosedStatus(last: RoundState, s: ChainSnapshot): RoundStat
   return last.status;
 }
 
-export function transitions(prev: ChainSnapshot | null, next: ChainSnapshot): NotifyEvent[] {
+export function transitions(prev: ChainSnapshot | null, next: ChainSnapshot): PlanEvent[] {
   if (!prev) return [];
-  const out: NotifyEvent[] = [];
+  const out: PlanEvent[] = [];
   const prevRounds = new Map(prev.rounds.map((r) => [r.pubkey, r]));
   const nextRounds = new Map(next.rounds.map((r) => [r.pubkey, r]));
   const owner = (plan: string) => next.plans.find((p) => p.pubkey === plan)?.owner ?? prev.plans.find((p) => p.pubkey === plan)?.owner ?? "";
@@ -70,7 +76,7 @@ export function roundOutcomes(prev: ChainSnapshot | null, next: ChainSnapshot): 
 
 export class Mirror {
   private prev: ChainSnapshot | null = null;
-  constructor(private snapshots: SnapshotCache, private repo: Repo, private notify: (e: NotifyEvent) => Promise<void>, private onOutcome?: (o: RoundOutcome) => Promise<void>) {}
+  constructor(private snapshots: SnapshotCache, private repo: Repo, private onOutcome?: (o: RoundOutcome) => Promise<void>) {}
   async tick() {
     const s = await this.snapshots.get();
     if (!s) return;
@@ -82,10 +88,7 @@ export class Mirror {
     await this.repo.upsertPlans(s.plans.map(planRow));
     await this.repo.upsertRounds([...s.rounds, ...closed].map(roundRow));
     await this.repo.upsertEpochs(s.epochs.map(epochRow));
-    for (const e of transitions(this.prev, s)) {
-      log.info("event", { type: e.type, plan: e.plan });
-      await this.notify(e).catch((err) => log.warn("notify failed", { err: (err as Error).message }));
-    }
+    for (const e of transitions(this.prev, s)) log.info("event", { type: e.type, plan: e.plan });
     if (this.onOutcome) for (const o of roundOutcomes(this.prev, s)) await this.onOutcome(o).catch((err) => log.warn("outcome hook failed", { round: o.round.pubkey, err: (err as Error).message }));
     this.prev = s;
   }
