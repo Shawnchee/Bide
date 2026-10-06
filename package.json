@@ -1,0 +1,11 @@
+{
+  "name": "bide",
+  "private": true,
+  "packageManager": "pnpm@11.10.0",
+  "scripts": {
+    "build:program": "anchor build",
+    "test:program": "pnpm --filter @bide/tests test",
+    "worker": "pnpm --filter @bide/worker dev",
+    "app": "pnpm --filter @bide/app dev"
+  }
+}

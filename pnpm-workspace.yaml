@@ -1,0 +1,13 @@
+packages:
+  - packages/*
+  - worker
+  - app
+  - scripts
+  - tests
+allowBuilds:
+  esbuild: true
+  bigint-buffer: true
+  bufferutil: true
+  utf-8-validate: true
+  protobufjs: true
+  unrs-resolver: false

@@ -1,0 +1,22 @@
+# Secrets — never commit
+keys/
+*.keypair.json
+id.json
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+*.pem
+
+# Build / tooling
+node_modules/
+target/
+.anchor/
+.wrangler/
+.vercel/
+.next/
+dist/
+
+# Local test fixtures dumped from devnet (regenerable)
+tests/fixtures/
