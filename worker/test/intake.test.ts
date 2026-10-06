@@ -1,7 +1,7 @@
 // Intake agent: shape schema, code-side validation (unsafe → null + question), 202-and-poll service, HTTP auth.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateIntake, intakeOutputSchema, intakeSystemPrompt, IntakeService, MAX_TEXT } from "../src/agents/intake.js";
+import { validateIntake, intakeOutputSchema, intakeSystemPrompt, IntakeService, MAX_TEXT, priceFromOffset } from "../src/agents/intake.js";
 import { MemoryRepo } from "../src/db/memory.js";
 import { scriptedTransport, reply } from "../src/desk/testlib.js";
 
@@ -44,6 +44,44 @@ test("intake: unsafe or unknown values are left empty with a question", () => {
   assert.equal(v({ horizon: "forever" }).fields.horizon, null);
 });
 
+test("intake: a % target is computed in code from spot and snapped to the $0.10 tick", () => {
+  // The live-demo sentence: "buy about 20 USDC of SOL if it dips around 2% this week, I'm patient".
+  const dip = v(
+    { goal: "buy", asset: "SOL", target_offset_pct: -2, amount: 20, amount_unit: "USDC", horizon: "1w", patience: "patient" },
+    { questions: ["What dollar price should trigger the buy for your ~2% dip?"] },
+  );
+  assert.equal(dip.fields.target_price_usd, 117.6, "120 × 0.98");
+  assert.equal(dip.fields.patience, "patient", "patience is kept but never sets the price");
+  assert.deepEqual(dip.questions, [], "the model's now-moot price question is dropped");
+  assert.match(dip.assumptions.join(" "), /2% below today's \$120\.00 is \$117\.60/);
+  // Buy rounds down, sell rounds up, on the tick grid.
+  assert.equal(validateIntake(intakeOutputSchema.parse({ fields: { goal: "buy", target_offset_pct: -2 } }), { ...ctx, spotUsd: 123.47 }).fields.target_price_usd, 121);
+  assert.equal(validateIntake(intakeOutputSchema.parse({ fields: { goal: "sell", target_offset_pct: 5 } }), { ...ctx, spotUsd: 123.47 }).fields.target_price_usd, 129.7);
+  assert.equal(priceFromOffset(123.47, -2, false), 121);
+  assert.equal(priceFromOffset(123.47, 5, true), 129.7);
+  // Wrong sign for the side → read as the size of the move, and said so.
+  const unsigned = v({ goal: "buy", target_offset_pct: 2 });
+  assert.equal(unsigned.fields.target_price_usd, 117.6);
+  assert.match(unsigned.assumptions.join(" "), /below/);
+  // Out of bounds / no spot / no side → empty + a question; an explicit dollar price wins.
+  const far = v({ goal: "buy", target_offset_pct: -45 });
+  assert.equal(far.fields.target_price_usd, null);
+  assert.match(far.questions.join(" "), /30%/);
+  const noSpot = validateIntake(intakeOutputSchema.parse({ fields: { goal: "buy", target_offset_pct: -2 } }), { ...ctx, spotUsd: null });
+  assert.equal(noSpot.fields.target_price_usd, null);
+  assert.match(noSpot.questions.join(" "), /price/);
+  assert.equal(v({ target_offset_pct: -2 }).fields.target_price_usd, null);
+  assert.equal(v({ goal: "buy", target_price_usd: 110, target_offset_pct: -2 }).fields.target_price_usd, 110);
+});
+
+test("intake: an undecided price is always surfaced as a question, never a preset", () => {
+  const r = v({ goal: "buy", amount: 20, amount_unit: "USDC", patience: "patient" });
+  assert.equal(r.fields.target_price_usd, null);
+  assert.equal(r.fields.patience, "patient");
+  assert.deepEqual(r.questions, ["What price do you want to buy at?"]);
+  assert.deepEqual(v({ goal: "sell" }, { questions: ["What price should it sell at?"] }).questions, ["What price should it sell at?"], "no duplicate");
+});
+
 test("intake: exit price only for buy-then-sell and above both prices", () => {
   assert.equal(v({ goal: "both", target_price_usd: 110, exit_price_usd: 140 }).fields.exit_price_usd, 140);
   assert.equal(v({ goal: "both", target_price_usd: 110, exit_price_usd: 115 }).fields.exit_price_usd, null, "below spot");
@@ -69,6 +107,8 @@ test("intake prompt: no base units, asks for questions instead of computing", ()
   const p = intakeSystemPrompt({ spotUsd: 120, nowIso: "2026-10-06T06:00:00Z", quickEnabled: true });
   assert.match(p, /never invent a price/);
   assert.match(p, /do not compute/);
+  assert.match(p, /target_offset_pct/);
+  assert.match(p, /never sets or changes the price/);
   assert.match(p, /\$120\.00/);
 });
 
