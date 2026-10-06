@@ -140,8 +140,12 @@ export function hasActiveQuickPlan(s: ChainSnapshot, asset: string, now: number)
   return s.plans.some((p) => p.quick && p.asset === asset && p.status === "Active" && !p.paused && p.sizeFilled < p.sizeTotal && now < p.horizonEnd);
 }
 
-/** Quick desk runs start this many seconds before the 60 s auction window (LLM latency), result held until it opens. */
-export const QUICK_DESK_LEAD_SECS = 90;
+/**
+ * Quick desk runs start this many seconds before the 60 s auction window (LLM latency), result held until it opens.
+ * 180 s (was 90): runs take 50–100 s each and two quick plans share the serial high lane — stress test 6 Oct 12:01:
+ * with 90 s the second plan's approved run finished at E−558+40 s → WindowMissed every epoch.
+ */
+export const QUICK_DESK_LEAD_SECS = 180;
 
 /** The quick epoch whose [expiry − 600 − lead, expiry − 540] desk window contains `now`, if any. */
 export function quickTargetExpiry(now: number, lead = QUICK_DESK_LEAD_SECS): number | null {
@@ -149,7 +153,7 @@ export function quickTargetExpiry(now: number, lead = QUICK_DESK_LEAD_SECS): num
   return null;
 }
 
-/** Should the desk run now? Std: 08:00–08:30 UTC. Quick: from 90 s before until the end of the 60 s auction window. */
+/** Should the desk run now? Std: 08:00–08:30 UTC. Quick: from QUICK_DESK_LEAD_SECS before until the end of the 60 s auction window. */
 export function inAuctionWindow(kind: EpochKind, now: number): boolean {
   if (kind === "Std") return stdWindowOpen(now);
   return quickTargetExpiry(now) !== null;

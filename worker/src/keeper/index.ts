@@ -46,6 +46,20 @@ export class Keeper {
   private backoff = new Map<string, { until: number; fails: number }>();
   private deskDone = new Set<string>(); // plan:windowKey — run the desk once per auction window per plan
   private deskInflight = new Set<string>();
+  /**
+   * Keeper desk runs are serialized: the GLM high lane is FIFO per call, so two concurrent runs interleave call by call
+   * and BOTH finish ~2× late (stress test 6 Oct 12:01: buy run done E−538, sell run E−498 → WindowMissed). One at a
+   * time, the first plan always makes the window and the second still has the rest of the lead + window.
+   */
+  private deskLane: Promise<unknown> = Promise.resolve();
+  private serialDesk<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.deskLane.then(fn, fn);
+    // A hung run must not wedge every later plan: the lane frees after DESK_LANE_HOLD_MS even if `run` is still going.
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const cap = new Promise<void>((r) => { t = setTimeout(r, DESK_LANE_HOLD_MS); (t as { unref?: () => void }).unref?.(); });
+    this.deskLane = Promise.race([run.then(() => {}, () => {}), cap]).finally(() => clearTimeout(t));
+    return run;
+  }
   private inflight = new Set<string>();
   private poolGaveUp = new Set<string>();
   private holdLoggedAt = new Map<string, number>();
@@ -170,7 +184,7 @@ export class Keeper {
     const repo = this.d.repo;
     const runId = await repo.createDeskRun({ plan_pubkey: p.pubkey, kind: "round", status: "running" });
     const onStep = (st: unknown) => repo.appendDeskStep(runId, st);
-    let r = await desk.runDesk({ plan_id: p.pubkey, kind: "round" }, { onStep });
+    let r = await this.serialDesk(() => desk.runDesk({ plan_id: p.pubkey, kind: "round" }, { onStep }));
     await this.recordRun(runId, r);
     for (let attempt = 0; attempt < 2; attempt++) {
       if (r.final.status === "flip") {
@@ -186,7 +200,8 @@ export class Keeper {
       await repo.updateDeskRun(runId, { status: outcome.offchain ? "offchain_error" : "rejected", error_code: outcome.code, tx_sig: outcome.sig ?? null });
       if (attempt === 1 || outcome.code === "WindowMissed") return; // no point retrying once the window is gone
       const retryId = await repo.createDeskRun({ plan_pubkey: p.pubkey, kind: "round", status: "running" });
-      r = await desk.retryWithChainError(r, outcome.code, { onStep: (st) => repo.appendDeskStep(retryId, st) });
+      const prev = r;
+      r = await this.serialDesk(() => desk.retryWithChainError(prev, outcome.code, { onStep: (st) => repo.appendDeskStep(retryId, st) }));
       await this.recordRun(retryId, r);
       return this.submitRetry(p, r, retryId);
     }
@@ -304,6 +319,9 @@ export class Keeper {
 
   private sleep(ms: number) { return (this.d.sleep ?? ((x: number) => new Promise<void>((r) => setTimeout(r, x))))(ms); }
 }
+
+/** Max time one keeper desk run holds the serial desk lane (runs normally take 50–100 s). */
+export const DESK_LANE_HOLD_MS = 150_000;
 
 /** open_round sends per desk result: 1 + up to 3 retries on transient (non-program) failures. */
 export const MAX_OPEN_ATTEMPTS = 4;

@@ -257,10 +257,10 @@ test("initRepo: Supabase with missing tables → in-process store (worker keeps 
   } finally { (cfg as any).supabaseUrl = saved.u; (cfg as any).supabaseServiceKey = saved.k; db.setRepoForTests(undefined as any); }
 });
 
-test("desk price_grid prices the next quick epoch as quick even 690 s out (desk 90 s lead)", async () => {
+test("desk price_grid prices the next quick epoch as quick even 780 s out (desk 180 s lead)", async () => {
   const { isQuickHorizon } = await import("../src/desk-tools.js");
   const E = Date.parse("2026-10-06T06:00:00Z") / 1000;
-  assert.ok(isQuickHorizon(E, E - 690));
-  assert.ok(isQuickHorizon(E + 1200, E - 690));
+  assert.ok(isQuickHorizon(E, E - 780));
+  assert.ok(isQuickHorizon(E + 1200, E - 780));
   assert.ok(!isQuickHorizon(E + 12 * 3600, E));
 });

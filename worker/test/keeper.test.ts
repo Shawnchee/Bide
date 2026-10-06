@@ -122,12 +122,12 @@ test("plans: expire, flip, desk only inside the auction window and when idle", (
   assert.deepEqual(only(plan({ status: "Filled" }), win), []);
 });
 
-test("quick plans: desk window = 90 s lead + the first 60 s of each 10-min epoch", () => {
-  assert.ok(inAuctionWindow("Quick", t("2026-10-05T14:58:30Z")));
+test("quick plans: desk window = 180 s lead + the first 60 s of each 10-min epoch", () => {
+  assert.ok(inAuctionWindow("Quick", t("2026-10-05T14:57:00Z")));
   assert.ok(inAuctionWindow("Quick", t("2026-10-05T15:00:00Z")));
   assert.ok(inAuctionWindow("Quick", t("2026-10-05T15:01:00Z")));
   assert.ok(!inAuctionWindow("Quick", t("2026-10-05T15:01:01Z")));
-  assert.ok(!inAuctionWindow("Quick", t("2026-10-05T14:58:29Z")));
+  assert.ok(!inAuctionWindow("Quick", t("2026-10-05T14:56:59Z")));
 });
 
 test("eligible expiries respect max_expiry_secs and horizon_end", () => {
@@ -142,10 +142,10 @@ test("eligible expiries respect max_expiry_secs and horizon_end", () => {
 });
 import { quickTargetExpiry } from "../src/keeper/plan.js";
 import { waitForWindowImpl } from "../src/keeper/index.js";
-test("quick desk lead: desk may start 90 s early; held until the window opens; missed window is off-chain", async () => {
+test("quick desk lead: desk may start 180 s early; held until the window opens; missed window is off-chain", async () => {
   const e = t("2026-10-05T15:10:00Z");
-  assert.equal(quickTargetExpiry(e - 691), null);
-  assert.equal(quickTargetExpiry(e - 690), e);
+  assert.equal(quickTargetExpiry(e - 781), null);
+  assert.equal(quickTargetExpiry(e - 780), e);
   assert.equal(quickTargetExpiry(e - 540), e);
   assert.equal(quickTargetExpiry(e - 539), null);
   let clock = (e - 650) * 1000;

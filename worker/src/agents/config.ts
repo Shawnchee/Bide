@@ -21,7 +21,7 @@ export function readAgentConfig(env: Record<string, string | undefined> = proces
   return {
     makerLlm: hasKey && (flag === undefined ? true : flag === "1"),
     makerTimeoutMs: Number(empty(env.MAKER_LLM_TIMEOUT_MS) ?? 300_000),
-    stanceLeadSecs: Number(empty(env.MAKER_STANCE_LEAD_SECS) ?? 240),
+    stanceLeadSecs: Number(empty(env.MAKER_STANCE_LEAD_SECS) ?? 420),
     makerMaxCallsPerHour: Number(empty(env.MAKER_LLM_MAX_PER_HOUR) ?? 30),
     intakeEnabled: hasKey && (empty(env.INTAKE_ENABLED) ?? "1") === "1",
     intakeTimeoutMs: Number(empty(env.INTAKE_TIMEOUT_MS) ?? 120_000),

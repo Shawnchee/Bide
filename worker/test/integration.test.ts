@@ -140,3 +140,24 @@ test("http shared secret: fail closed, constant-time compare, Bearer accepted", 
   assert.equal(secretOk("s3cret", "s3cret"), true);
   assert.equal(secretOk("s3cre", "s3cret"), false);
 });
+
+test("keeper desk runs are serialized: two plans never run their desks at the same time", async () => {
+  const h = harness(true, async () => "OkSig");
+  let live = 0, maxLive = 0;
+  const order: string[] = [];
+  (h.keeper as any).d.desk.runDesk = async (inp: any) => {
+    live++; maxLive = Math.max(maxLive, live); order.push(`start:${inp.plan_id}`);
+    await new Promise((r) => setTimeout(r, 20));
+    order.push(`end:${inp.plan_id}`); live--;
+    return { ...result("113000000"), final: { status: "skip", proposal: null, reason: "" } };
+  };
+  const other = { ...plan, pubkey: Keypair.generate().publicKey.toBase58() };
+  await Promise.all([h.keeper.runDeskForPlan(plan), h.keeper.runDeskForPlan(other)]);
+  assert.equal(maxLive, 1);
+  assert.deepEqual(order, [`start:${plan.pubkey}`, `end:${plan.pubkey}`, `start:${other.pubkey}`, `end:${other.pubkey}`]);
+  // a failing run frees the lane for the next one
+  (h.keeper as any).d.desk.runDesk = async () => { throw new Error("glm down"); };
+  await assert.rejects(h.keeper.runDeskForPlan(plan));
+  (h.keeper as any).d.desk.runDesk = async () => ({ ...result("113000000"), final: { status: "skip", proposal: null, reason: "" } });
+  await h.keeper.runDeskForPlan(other);
+});
