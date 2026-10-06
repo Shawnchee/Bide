@@ -14,7 +14,7 @@ import { RunDetail } from "@/components/desk/run-detail";
 import { DEFAULT_FEE_BPS } from "@/lib/constants";
 import { PROGRAM_NOT_READY, type DecodedPlan } from "@/lib/bide-client";
 import { dateShort, dateTimeUtc, duration, fromBase, toBig, toUnix, usd, usdc, usdcPrice } from "@/lib/format";
-import { LEND_EXCHANGE_PRICE_PRECISION, LEND_MARKETS, LENDING_TOKEN_EXCHANGE_PRICE_OFFSET } from "@bide/shared";
+import { epochPda, LEND_EXCHANGE_PRICE_PRECISION, LEND_MARKETS, LENDING_TOKEN_EXCHANGE_PRICE_OFFSET } from "@bide/shared";
 import { fmtPrice, fmtSize } from "@/lib/plan-math";
 import { sendAndConfirm } from "@/lib/send";
 import { buildClosePlanTx, buildPausePlanTx, explainTxError } from "@/lib/tx";
@@ -158,12 +158,26 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
     realtimeFilter: latest ? `round_pubkey=eq.${latest.round_pubkey}` : undefined,
     pollMs: 8000,
   });
+  // Exact epoch for the latest round (A-M3): the row's epoch_pubkey when the mirror has it, else the epoch PDA
+  // [epoch, asset, kind, expiry] — the same seeds the program uses. Never matched by kind or expiry string alone.
+  const latestEpochKey = useMemo(() => {
+    if (!latest) return null;
+    if (latest.epoch_pubkey) return latest.epoch_pubkey;
+    const assetKey = latest.asset ?? (plans.status === "ready" ? plans.rows[0]?.asset : undefined);
+    const planQuick = chainPlan && typeof chainPlan === "object" ? chainPlan.quick : plans.status === "ready" ? plans.rows[0]?.quick : undefined;
+    const expiry = toUnix(latest.expiry);
+    if (!assetKey || planQuick === undefined || expiry === null) return null;
+    try {
+      return epochPda(new PublicKey(assetKey), planQuick ? "Quick" : "Std", expiry)[0].toBase58();
+    } catch {
+      return null;
+    }
+  }, [latest, plans, chainPlan]);
   const epochs = useTable<EpochRow>({
     table: "epochs",
-    // rounds mirror has no epoch link; epochs are unique per (asset, kind, expiry) — expiry is timestamptz.
-    eq: [["expiry", latest ? new Date((toUnix(latest.expiry) ?? 0) * 1000).toISOString() : ""]],
-    limit: 4,
-    enabled: Boolean(latest),
+    eq: [["epoch_pubkey", latestEpochKey ?? ""]],
+    limit: 1,
+    enabled: Boolean(latestEpochKey),
     pollMs: 5000,
   });
 
@@ -232,10 +246,7 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
   const decoded = chainPlan && typeof chainPlan === "object" ? chainPlan : null;
   const quick = decoded?.quick ?? plan?.quick ?? false;
   const epochRows = epochs.status === "ready" ? epochs.rows : [];
-  const epoch = latest
-    ? epochRows.find((e) => e.epoch_pubkey === latest.epoch_pubkey) ??
-      epochRows.find((e) => String(e.kind).toLowerCase() === (quick ? "quick" : "std"))
-    : undefined;
+  const epoch = latestEpochKey ? epochRows.find((e) => e.epoch_pubkey === latestEpochKey) : undefined;
   const stage = latest ? roundStage(latest, epoch, now, quick) : null;
 
   const earned = useMemo(() => roundRows.reduce((acc, r) => acc + (netPremium(r) ?? 0n), 0n), [roundRows]);

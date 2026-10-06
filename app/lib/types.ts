@@ -57,6 +57,8 @@ export interface RoundRow {
   auction_start?: number | string | null;
   auction_secs?: number | null;
   epoch_pubkey?: string | null;
+  /** Asset account pubkey (rounds.asset, agents migration). */
+  asset?: string | null;
   memo_hash?: string | null;
   cex_fair_premium?: U64ish | null;
   created_at?: string | null;
