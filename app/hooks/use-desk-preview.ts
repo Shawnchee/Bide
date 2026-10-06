@@ -49,77 +49,110 @@ function fromRow(row: DeskRunRow): DeskPreviewData {
 }
 
 const GIVE_UP_MS = 240_000;
+const POLL_MS = 1_200;
+/** Per-request client timeouts: the routes give up on the worker at 15 s / 5 s, these are a backstop. */
+const POST_TIMEOUT_MS = 20_000;
+const POLL_TIMEOUT_MS = 8_000;
+/** Consecutive failed polls before we call the desk unreachable (~10–40 s depending on how they fail). */
+const MAX_MISSES = 4;
+
+export const UNREACHABLE = "Can't reach the desk right now — you can still review and start the plan.";
+
+/** fetch that aborts on `parent` or after `ms` (manual, for browsers without AbortSignal.any). */
+async function fetchWithin(url: string, init: RequestInit, parent: AbortSignal, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort();
+  parent.addEventListener("abort", onAbort);
+  const t = setTimeout(onAbort, ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+    parent.removeEventListener("abort", onAbort);
+  }
+}
 
 const isTerminal = (d: DeskPreviewData) => Boolean(d.final?.status) || d.status === "error";
 
-/** Runs a desk preview through /api/desk/preview and streams steps from Supabase desk_runs. */
+/** Runs a desk preview through /api/desk/preview and streams steps from the worker's run record. Never spins forever:
+ * a failed POST, MAX_MISSES failed polls in a row, a lost run, or GIVE_UP_MS all end in an error state the UI can retry. */
 export function useDeskPreview() {
   const [state, setState] = useState<DeskPreviewState>({ status: "idle" });
   const stopRef = useRef<(() => void) | null>(null);
+  const lastDraft = useRef<Record<string, unknown> | null>(null);
 
   useEffect(() => () => stopRef.current?.(), []);
 
-  /** Poll the worker's run record (steps are appended as the desk works). */
+  /** Poll the worker's run record (steps are appended as the desk works). One request in flight at a time. */
   const follow = useCallback((runId: string) => {
     const startedAt = Date.now();
     let stopped = false;
     let misses = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const ctrl = new AbortController();
     const stop = () => {
       stopped = true;
-      clearInterval(t);
+      if (timer) clearTimeout(timer);
+      ctrl.abort();
+    };
+    const fail = (message: string) => {
+      stop();
+      setState((s) => ({ status: "error", message, data: "data" in s ? s.data : null }));
     };
     const poll = async () => {
+      if (stopped) return;
+      // Runs take 50–100 s, plus queueing behind live keeper rounds (they always go first).
+      if (Date.now() - startedAt > GIVE_UP_MS)
+        return fail("The desk is busy with live rounds and hasn't reached your preview yet. Try again in a few minutes — you can still start the plan.");
       try {
-        const res = await fetch(`/api/desk/runs/${runId}`, { cache: "no-store" });
+        const res = await fetchWithin(`/api/desk/runs/${runId}`, { cache: "no-store" }, ctrl.signal, POLL_TIMEOUT_MS);
         if (stopped) return;
+        // The run is gone (e.g. the worker restarted): polling again won't bring it back.
+        if (res.status === 404) return fail("The desk lost this preview. Try again — you can still review and start the plan.");
         if (!res.ok) throw new Error(String(res.status));
         misses = 0;
         const d = fromRow((await res.json()) as DeskRunRow);
+        if (stopped) return;
         setState(isTerminal(d) ? { status: "done", data: d } : { status: "running", data: d });
-        if (isTerminal(d)) stop();
+        if (isTerminal(d)) return stop();
       } catch {
-        if (++misses >= 5) {
-          stop();
-          setState((s) => ({ status: "error", message: "Lost contact with the desk. Try again.", data: "data" in s ? s.data : null }));
-        }
+        if (stopped) return;
+        if (++misses >= MAX_MISSES) return fail(UNREACHABLE);
       }
+      timer = setTimeout(poll, POLL_MS);
     };
-    const t = setInterval(() => {
-      // Runs take 50–100 s, plus queueing behind live keeper rounds (they always go first).
-      if (Date.now() - startedAt > GIVE_UP_MS) {
-        stop();
-        setState((s) => ({
-          status: "error",
-          message: "The desk is busy with live rounds and hasn't reached your preview yet. Try again in a few minutes — you can still start the plan.",
-          data: "data" in s ? s.data : null,
-        }));
-        return;
-      }
-      poll();
-    }, 1200);
     stopRef.current = stop;
-    poll();
+    void poll();
   }, []);
 
   const run = useCallback(
     async (draft: Record<string, unknown>) => {
       stopRef.current?.();
+      lastDraft.current = draft;
+      const ctrl = new AbortController();
+      let stopped = false;
+      stopRef.current = () => {
+        stopped = true;
+        ctrl.abort();
+      };
       setState({ status: "running", data: empty(null) });
       try {
-        const res = await fetch("/api/desk/preview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(draft),
-        });
+        const res = await fetchWithin(
+          "/api/desk/preview",
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft) },
+          ctrl.signal,
+          POST_TIMEOUT_MS,
+        );
         const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        if (stopped) return;
         if (!res.ok) {
           const retry = Number(res.headers.get("retry-after") ?? body.retry_after ?? 0);
           const msg =
             res.status === 429
               ? `The desk is busy right now. Try again in ${retry > 0 ? `${Math.ceil(retry)}s` : "a minute"} — you can still review and start the plan.`
-              : res.status === 503 || res.status === 502
-              ? "The AI desk is offline right now, so there's no live quote. You can still review and start the plan — the desk prices each round when it opens."
-              : (body.error as string) || "The desk couldn't price this plan.";
+              : res.status >= 500
+                ? UNREACHABLE
+                : (body.error as string) || "The desk couldn't price this plan.";
           setState({ status: "error", message: msg, data: null });
           return;
         }
@@ -128,18 +161,23 @@ export function useDeskPreview() {
         else if (d.runId) {
           setState({ status: "running", data: d });
           follow(d.runId);
-        } else setState({ status: "error", message: "The desk returned an empty answer.", data: d });
+        } else setState({ status: "error", message: "The desk returned an empty answer. Try again — you can still review and start the plan.", data: d });
       } catch {
-        setState({ status: "error", message: "Couldn't reach the desk. Check your connection and try again.", data: null });
+        if (!stopped) setState({ status: "error", message: UNREACHABLE, data: null });
       }
     },
     [follow],
   );
+
+  /** Re-run the last draft (the Retry button). */
+  const retry = useCallback(() => {
+    if (lastDraft.current) void run(lastDraft.current);
+  }, [run]);
 
   const reset = useCallback(() => {
     stopRef.current?.();
     setState({ status: "idle" });
   }, []);
 
-  return { state, run, reset };
+  return { state, run, retry, reset };
 }

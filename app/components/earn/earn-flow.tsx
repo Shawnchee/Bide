@@ -128,6 +128,8 @@ export function EarnFlow() {
   const [touched, setTouched] = useState(false);
   /** Intake result waiting to be applied after the preset effects below have run (they reset target/horizon). */
   const [intake, setIntake] = useState<IntakeFields | null>(null);
+  /** The assistant couldn't settle a price: keep the field empty and flagged instead of falling back to a preset. */
+  const [priceNeeded, setPriceNeeded] = useState(false);
 
   const spotState = useSpot(asset);
   const spot = spotState.status === "ready" ? spotState.spot.price : null;
@@ -135,7 +137,7 @@ export function EarnFlow() {
 
   // Initialise / re-snap the target when spot arrives or the side/quick mode changes.
   useEffect(() => {
-    if (!spot) return;
+    if (!spot || priceNeeded) return;
     const p = presetPrice(spot, patience, buySide, quick, tick);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTarget(p);
@@ -160,20 +162,23 @@ export function EarnFlow() {
     const f = intake;
     const qk = f.quick ?? quick;
     const buy = (f.goal ?? goal) !== "sell";
+    // Stated patience is a preference the desk/Risk weigh (size, expiry); it never picks the price.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- must run after the preset effects above in the same commit
+    if (f.patience) setPatience(f.patience);
     if (f.target_price_usd) {
       const snapped = snapDollars(f.target_price_usd, tick, !buy);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- must run after the preset effects above in the same commit
+      setPriceNeeded(false);
       setTarget(snapped);
       setTargetText(priceText(snapped));
-      if (spot) {
+      if (spot && !f.patience) {
         const near = nearestPatience(spot, snapped, buy, qk);
         if (near) setPatience(near);
       }
-    } else if (f.patience && spot) {
-      setPatience(f.patience);
-      const v = presetPrice(spot, f.patience, buy, qk, tick);
-      setTarget(v);
-      setTargetText(priceText(v));
+    } else {
+      // Price still open: leave it visibly empty rather than silently showing a preset the user never chose.
+      setPriceNeeded(true);
+      setTarget(null);
+      setTargetText("");
     }
     if (f.exit_price_usd) setExitText(priceText(snapDollars(f.exit_price_usd, tick, true)));
     if (f.amount) setAmountText(String(f.amount));
@@ -194,6 +199,7 @@ export function EarnFlow() {
   const pickPatience = (p: Patience) => {
     setPatience(p);
     if (spot) {
+      setPriceNeeded(false);
       const v = presetPrice(spot, p, buySide, quick, tick);
       setTarget(v);
       setTargetText(priceText(v));
@@ -204,6 +210,7 @@ export function EarnFlow() {
     setTargetText(s);
     const v = Number(s);
     if (Number.isFinite(v) && v > 0) {
+      setPriceNeeded(false);
       setTarget(v);
       if (spot) {
         const near = nearestPatience(spot, v, buySide, quick);
@@ -228,6 +235,8 @@ export function EarnFlow() {
     return [snapDollars(spot * a, tick, true), snapDollars(spot * b, tick, false)];
   }, [spot, buySide, quick, tick]);
   const toTicks = (d: number) => Math.round(d / td);
+  /** Which preset (if any) the current price sits on; drives the radio highlight. */
+  const activePreset = spot && target ? nearestPatience(spot, target, buySide, quick) : null;
 
   const amount = Number(amountText);
   const exitDollars = goal === "both" ? Number(exitText) || null : null;
@@ -356,7 +365,7 @@ export function EarnFlow() {
         >
           <div role="radiogroup" aria-label="How patient are you?" className="grid gap-2 sm:grid-cols-3">
             {PATIENCE.map((p) => (
-              <Choice key={p.id} selected={patience === p.id} onClick={() => pickPatience(p.id)} disabled={!spot}>
+              <Choice key={p.id} selected={!priceNeeded && activePreset === p.id} onClick={() => pickPatience(p.id)} disabled={!spot}>
                 <span className="font-medium">{p.label}</span>
                 <span className="text-xs text-muted-foreground">
                   {spot ? `$${fmtPrice(presetPrice(spot, p.id, buySide, quick, tick))} · ` : ""}
@@ -384,7 +393,7 @@ export function EarnFlow() {
               </div>
             </div>
           ) : null}
-          <div className="swap-panel">
+          <div className={cn("swap-panel", priceNeeded && "border-primary ring-2 ring-primary/40")}>
             <Label htmlFor="target" className="text-xs font-medium text-muted-foreground">
               {goal === "sell" ? "Sell at" : "Buy at"} · or type a price
             </Label>
@@ -396,13 +405,20 @@ export function EarnFlow() {
                 autoComplete="off"
                 className="swap-input"
                 value={targetText}
+                placeholder="0.00"
+                required
                 onChange={(e) => onTargetText(e.target.value.replace(/[^0-9.]/g, ""))}
                 onBlur={snapTyped}
-                aria-invalid={touched && !target}
-                aria-describedby="target-hint"
+                aria-invalid={(touched || priceNeeded) && !target}
+                aria-describedby={priceNeeded ? "target-needed target-hint" : "target-hint"}
               />
               <span className="swap-pill">USD / {asset.symbol}</span>
             </div>
+            {priceNeeded && (
+              <p id="target-needed" className="mt-2 text-sm font-medium text-primary">
+                Your price is still to decide — pick one of the options above or type a price.
+              </p>
+            )}
             <p id="target-hint" className="mt-2 text-xs text-muted-foreground">
               Prices move in ${fmtPrice(td)} steps; we round {buySide ? "down" : "up"} to the nearest one.
             </p>

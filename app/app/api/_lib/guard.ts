@@ -51,11 +51,20 @@ export const INTAKE_MAX_TEXT = 500;
 const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F​-‏‪-‮⁠-⁩﻿]/g;
 export const cleanIntakeText = (s: string) => s.replace(CONTROL, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 
-/** Caller IP: first x-forwarded-for hop (set by Vercel), else x-real-ip. Only IP-shaped values are forwarded. */
+/**
+ * Caller IP for rate limiting. Prefer x-real-ip (Vercel's edge overwrites it with the real client address), else the
+ * LAST x-forwarded-for hop (appended by the nearest proxy). Never the first hop: a client can send any x-forwarded-for
+ * it likes and the first entry is whatever it wrote. Only IP-shaped values are forwarded; otherwise none.
+ */
 export function clientIp(req: Request): string | null {
-  const xff = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const ip = xff || req.headers.get("x-real-ip")?.trim() || "";
-  return /^[0-9a-fA-F:.]{2,64}$/.test(ip) ? ip : null;
+  const ipLike = (v: string | null | undefined) => {
+    const ip = v?.trim() ?? "";
+    return /^[0-9a-fA-F:.]{2,64}$/.test(ip) ? ip : null;
+  };
+  const real = ipLike(req.headers.get("x-real-ip"));
+  if (real) return real;
+  const hops = req.headers.get("x-forwarded-for")?.split(",") ?? [];
+  return ipLike(hops[hops.length - 1]);
 }
 
 /** Relay a worker response; keeps 429 + Retry-After intact. */

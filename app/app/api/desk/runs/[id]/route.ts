@@ -11,7 +11,9 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/desk/runs/[id]"
     const body = await res.json().catch(() => null);
     return Response.json(body ?? { error: "bad worker response" }, { status: res.ok ? 200 : res.status });
   } catch (e) {
+    // Unreachable / timed out → 503 "unreachable" so the client stops at once with a clear message instead of guessing.
     const err = e as WorkerError;
-    return Response.json({ error: err.message }, { status: err.status ?? 502 });
+    const down = err.status === 502 || err.status === 503;
+    return Response.json({ error: err.message, ...(down ? { code: "unreachable" } : {}) }, { status: down ? 503 : (err.status ?? 502) });
   }
 }
