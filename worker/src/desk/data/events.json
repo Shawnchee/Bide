@@ -1,0 +1,19 @@
+{
+  "_about": "Static curated macro calendar for the desk's event_calendar tool. Every date was read from the official source page on 2026-10-05. Times: FOMC statement 2:00 pm ET (standard practice; not restated on the calendar page), BLS releases 8:30 am ET. US DST ends 2026-11-01 (EDT = UTC-4 before, EST = UTC-5 after). Do not add dates from memory.",
+  "_sources": {
+    "fomc": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+    "cpi": "https://www.bls.gov/schedule/news_release/cpi.htm",
+    "nfp": "https://www.bls.gov/schedule/news_release/empsit.htm"
+  },
+  "checked_at": "2026-10-05",
+  "events": [
+    { "id": "cpi-2026-09", "kind": "cpi", "name": "US CPI (September 2026)", "at_utc": "2026-10-14T12:30:00Z", "source": "https://www.bls.gov/schedule/news_release/cpi.htm" },
+    { "id": "fomc-2026-10", "kind": "fomc", "name": "FOMC rate decision (Oct 27-28 meeting)", "at_utc": "2026-10-28T18:00:00Z", "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm", "note": "Meeting dates are tentative until confirmed at the preceding meeting." },
+    { "id": "nfp-2026-10", "kind": "nfp", "name": "US jobs report (October 2026)", "at_utc": "2026-11-06T13:30:00Z", "source": "https://www.bls.gov/schedule/news_release/empsit.htm" },
+    { "id": "cpi-2026-10", "kind": "cpi", "name": "US CPI (October 2026)", "at_utc": "2026-11-10T13:30:00Z", "source": "https://www.bls.gov/schedule/news_release/cpi.htm" },
+    { "id": "nfp-2026-11", "kind": "nfp", "name": "US jobs report (November 2026)", "at_utc": "2026-12-04T13:30:00Z", "source": "https://www.bls.gov/schedule/news_release/empsit.htm" },
+    { "id": "fomc-2026-12", "kind": "fomc", "name": "FOMC rate decision + projections (Dec 8-9 meeting)", "at_utc": "2026-12-09T19:00:00Z", "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm", "note": "Summary of Economic Projections meeting. Tentative until confirmed." },
+    { "id": "cpi-2026-11", "kind": "cpi", "name": "US CPI (November 2026)", "at_utc": "2026-12-10T13:30:00Z", "source": "https://www.bls.gov/schedule/news_release/cpi.htm" },
+    { "id": "fomc-2027-01", "kind": "fomc", "name": "FOMC rate decision (Jan 26-27 meeting)", "at_utc": "2027-01-27T19:00:00Z", "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm", "note": "Tentative until confirmed." }
+  ]
+}
