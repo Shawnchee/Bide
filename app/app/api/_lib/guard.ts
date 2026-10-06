@@ -37,7 +37,8 @@ export function checkPreviewDraft(raw: unknown): { draft: Record<string, unknown
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: "invalid body" };
   const draft: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    const spec = PREVIEW_FIELDS[k];
+    // Own keys only: "__proto__"/"constructor" must not resolve to Object.prototype members.
+    const spec = Object.hasOwn(PREVIEW_FIELDS, k) ? PREVIEW_FIELDS[k] : undefined;
     if (!spec) return { error: `unknown field: ${k.slice(0, 40)}` };
     if (v === undefined || v === null) continue;
     if (!spec.ok(v)) return { error: `invalid ${k}` };
