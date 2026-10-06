@@ -166,3 +166,12 @@ test("HTTP /intake: shared secret required; 202 then poll", async () => {
     (cfg as any).workerSharedSecret = saved;
   }
 });
+
+test("intake: a rejected deadline drops the model's matching assumption", () => {
+  const tooSoon = new Date((ctx.nowSecs + 86_400) * 1000).toISOString().slice(0, 10);
+  const r = v({ goal: "sell", asset: "SOL", horizon: "date", deadline_date: tooSoon }, { assumptions: [`I set the deadline to ${tooSoon}, which is 2 days from today.`, "I assumed standard minimum pay."] });
+  assert.equal(r.fields.deadline_date, null);
+  assert.ok(r.questions.some((q) => /deadline between 2 days/.test(q)));
+  assert.ok(!r.assumptions.some((a) => a.includes(tooSoon)));
+  assert.ok(r.assumptions.includes("I assumed standard minimum pay."));
+});

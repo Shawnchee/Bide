@@ -149,7 +149,12 @@ export function validateIntake(raw: z.infer<typeof intakeOutputSchema>, ctx: { s
     const ms = /^\d{4}-\d{2}-\d{2}$/.test(date) ? Date.parse(`${date}T00:00:00Z`) : NaN;
     const days = (ms / 1000 - ctx.nowSecs) / DAY;
     if (Number.isFinite(ms) && days >= 2 && days <= 179) { out.deadline_date = date; out.horizon = "date"; }
-    else { out.horizon = null; ask("Pick a deadline between 2 days and 6 months from now."); }
+    else {
+      out.horizon = null;
+      ask("Pick a deadline between 2 days and 6 months from now.");
+      // Don't keep the model's "I set the deadline to <date>" next to a question rejecting that date.
+      for (let i = assumptions.length - 1; i >= 0; i--) if (assumptions[i]!.includes(date) || /deadline/i.test(assumptions[i]!)) assumptions.splice(i, 1);
+    }
   } else if (out.horizon === "date") { out.horizon = null; ask("Which date should it finish by?"); }
 
   out.min_pay = oneOf(f.min_pay, MIN_PAY);
