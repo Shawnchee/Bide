@@ -1,0 +1,19 @@
+{
+  "name": "@bide/tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "tsx --test --test-concurrency=1 src/*.test.ts" },
+  "dependencies": {
+    "@bide/shared": "workspace:*",
+    "@anchor-lang/core": "1.0.3",
+    "@solana/web3.js": "^1.98.0",
+    "@solana/spl-token": "^0.4.13",
+    "@pythnetwork/pyth-solana-receiver": "^0.16.0",
+    "@pythnetwork/hermes-client": "^3.1.0",
+    "litesvm": "^1.5.0",
+    "dotenv": "^16.4.7",
+    "bn.js": "^5.2.1"
+  },
+  "devDependencies": { "tsx": "^4.19.2", "typescript": "^5.7.3", "@types/node": "^22.10.0", "@types/bn.js": "^5.1.6" }
+}
