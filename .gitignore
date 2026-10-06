@@ -20,3 +20,6 @@ dist/
 
 # Local test fixtures dumped from devnet (regenerable)
 tests/fixtures/
+.vercel
+.env*
+!.env.example

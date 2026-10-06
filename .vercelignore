@@ -1,0 +1,46 @@
+# Allowlist: upload only what the Next.js app build needs.
+/*
+!/app
+!/packages
+!/package.json
+!/pnpm-lock.yaml
+!/pnpm-workspace.yaml
+!/tsconfig.base.json
+
+# Secrets — never upload (belt and braces, also covered by the allowlist above)
+keys
+**/keys
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.keypair.json
+id.json
+.dev.vars
+.dev.vars*
+**/.dev.vars*
+
+# Not needed for the app build
+/notes
+/docs
+.claude
+**/.claude
+/target
+/tests
+/tests/fixtures
+/research
+/scripts
+/worker
+/programs
+/supabase
+**/node_modules
+node_modules
+app/.next
+**/.next
+.vercel
+**/*.tsbuildinfo
+*.md
+**/*.md
