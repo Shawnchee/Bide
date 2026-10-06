@@ -23,6 +23,11 @@ export class MemoryRepo implements Repo {
   async updateDeskRun(id: string, patch: Partial<DeskRunRow>) { const r = this.deskRuns.get(id); if (r) this.deskRuns.set(id, { ...r, ...patch, updated_at: now() }); }
   async appendDeskStep(id: string, step: unknown) { const r = this.deskRuns.get(id); if (r) { r.steps = [...(r.steps ?? []), step]; r.updated_at = now(); } }
   async getDeskRun(id: string) { return this.deskRuns.get(id) ?? null; }
+  async abandonStaleDeskRuns(before: string) {
+    let n = 0;
+    for (const [id, r] of this.deskRuns) if (r.status === "running" && (r.created_at ?? "") < before) { this.deskRuns.set(id, { ...r, status: "abandoned", error_code: "WorkerRestart", updated_at: now() }); n++; }
+    return n;
+  }
   async upsertPlans(rows: PlanRow[]) { for (const r of rows) this.plans.set(r.plan_pubkey, { ...r, updated_at: now() }); }
   async upsertRounds(rows: RoundRow[]) { for (const r of rows) this.rounds.set(r.round_pubkey, { ...r, sigs: { ...(this.rounds.get(r.round_pubkey)?.sigs ?? {}), ...(r.sigs ?? {}) }, updated_at: now() }); }
   async addRoundSig(round: string, label: string, sig: string) { const r = this.rounds.get(round); if (r) r.sigs = { ...(r.sigs ?? {}), [label]: sig }; }

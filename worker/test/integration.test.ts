@@ -33,17 +33,18 @@ const result = (strike: string) => ({
   memo_hash: new Uint8Array(32).fill(7), memo_hash_hex: "07".repeat(32), steps: [], card: null, plan: null,
 }) as any;
 
-function harness(withEpoch: boolean, openRound: (args: any) => Promise<string>) {
+function harness(withEpoch: boolean, openRound: (args: any) => Promise<string>, planAfter?: () => Partial<PlanState> | null) {
   const calls: any[] = [];
   const retries: string[] = [];
   const chain: any = { programId: PROGRAM, openRound: async (_kp: Keypair, _p: PublicKey, a: any) => { calls.push(a); return openRound(a); } };
-  const snapshots: any = { get: async () => snap(withEpoch), invalidate() {}, peek: () => snap(withEpoch) };
+  const cur = () => { const s = snap(withEpoch); const o = calls.length && planAfter ? planAfter() : null; if (o) s.plans = [{ ...plan, ...o }]; return s; };
+  const snapshots: any = { get: async () => cur(), invalidate() {}, peek: () => cur() };
   const desk: any = {
     runDesk: async () => result("120000000"), // out of bounds on purpose (strike > strike_max)
     retryWithChainError: async (_r: any, code: string) => { retries.push(code); return result("113000000"); },
   };
   const repo = new MemoryRepo();
-  return { keeper: new Keeper({ chain, snapshots, signer: Keypair.generate(), repo, desk, quickEnabled: false, now: () => Date.parse("2026-10-07T08:05:00Z") }), calls, retries, repo };
+  return { keeper: new Keeper({ chain, snapshots, signer: Keypair.generate(), repo, desk, quickEnabled: false, now: () => Date.parse("2026-10-07T08:05:00Z"), sleep: async () => {} }), calls, retries, repo };
 }
 
 test("on-chain rejection: recorded with code + tx sig, exactly one retry, retry submitted as-is", async () => {
@@ -77,11 +78,43 @@ test("std desk finishing after 08:30 → WindowMissed (off-chain), nothing sent"
   assert.equal([...h.repo.deskRuns.values()][0]!.error_code, "WindowMissed");
   assert.deepEqual(h.retries, [], "no desk retry after the window closed");
 });
-test("transient send failure is not treated as a rejection (no desk retry)", async () => {
+test("transient send failure is not treated as a rejection (no desk retry); same memo resent up to 4×", async () => {
   const h = harness(true, async () => { throw new Error("fetch failed"); });
   await h.keeper.runDeskForPlan(plan);
   assert.deepEqual(h.retries, []);
-  assert.equal([...h.repo.deskRuns.values()][0]!.status, "submit_failed");
+  assert.equal(h.calls.length, 4, "1 send + 3 retries");
+  assert.ok(h.calls.every((c) => c.roundIndex === 3 && c.strike === 120_000_000n && c.memoHash[0] === 7), "same desk result each time");
+  const run = [...h.repo.deskRuns.values()][0]!;
+  assert.equal(run.status, "submit_failed");
+  assert.equal(run.error_code, "Transient");
+});
+test("transient failure then success → submitted, no desk rerun", async () => {
+  let n = 0;
+  const h = harness(true, async () => { if (n++ === 0) { const e: any = new Error("tx X not confirmed before blockhash expiry (block height exceeded); retryable"); e.signature = "ExpSig"; throw e; } return "OkSig2"; });
+  await h.keeper.runDeskForPlan(plan);
+  assert.equal(h.calls.length, 2);
+  assert.deepEqual(h.retries, []);
+  const runs = [...h.repo.deskRuns.values()];
+  assert.equal(runs.length, 1);
+  assert.deepEqual([runs[0]!.status, runs[0]!.tx_sig], ["submitted", "OkSig2"]);
+});
+test("timed-out send that actually landed → no second open_round", async () => {
+  const h = harness(true, async () => { const e: any = new Error("request timed out"); e.signature = "LandedSig"; throw e; }, () => ({ roundCount: 4, activeRound: "NewRound" }));
+  await h.keeper.runDeskForPlan(plan);
+  assert.equal(h.calls.length, 1, "chain re-read showed the round; nothing resent");
+  const run = [...h.repo.deskRuns.values()][0]!;
+  assert.deepEqual([run.status, run.tx_sig], ["submitted", "LandedSig"]);
+});
+test("transient retries stop when the std window closes → WindowMissed (off-chain)", async () => {
+  const h = harness(true, async () => { throw new Error("fetch failed"); });
+  let t = Date.parse("2026-10-07T08:29:50Z");
+  (h.keeper as any).d.now = () => t;
+  (h.keeper as any).d.sleep = async () => { t += 30_000; };
+  await h.keeper.runDeskForPlan(plan);
+  assert.equal(h.calls.length, 1);
+  const run = [...h.repo.deskRuns.values()][0]!;
+  assert.deepEqual([run.status, run.error_code], ["offchain_error", "WindowMissed"]);
+  assert.deepEqual(h.retries, []);
 });
 
 const round = (o: Partial<RoundState>): RoundState => ({

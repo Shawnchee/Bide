@@ -48,6 +48,8 @@ export interface Repo {
   /** Append one step to desk_runs.steps (progress streaming for /earn preview). */
   appendDeskStep(id: string, step: unknown): Promise<void>;
   getDeskRun(id: string): Promise<DeskRunRow | null>;
+  /** Mark desk runs still `running` that were created before `before` (ISO) as `abandoned` (killed by a restart). Returns the count. */
+  abandonStaleDeskRuns(before: string): Promise<number>;
   upsertPlans(rows: PlanRow[]): Promise<void>;
   upsertRounds(rows: RoundRow[]): Promise<void>;
   /** Merge one signature into rounds.sigs (e.g. { take: sig }). */

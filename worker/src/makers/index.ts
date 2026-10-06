@@ -5,6 +5,7 @@ import { PublicKey, type Keypair } from "@solana/web3.js";
 import { blackPrice } from "../pricer/bs.js";
 import type { BideChain } from "../chain/client.js";
 import { parseProgramError } from "../chain/errors.js";
+import { takeDeadline } from "../chain/auction.js";
 import type { SnapshotCache } from "../chain/snapshot-cache.js";
 import type { AssetState, ChainSnapshot, RoundState } from "../chain/types.js";
 import type { Repo } from "../db/types.js";
@@ -65,7 +66,7 @@ export class Makers {
   private bots: Bot[];
   private seen = new Map<string, RoundView>();
   private attempted = new Set<string>();
-  private staleLogged = new Set<string>();
+  private staleLogged = new Map<string, number>();
   /** Bid inserts in flight (a take must not mark `took` before its row exists). */
   private persisting = new Map<string, Promise<void>>();
   private repo?: Repo;
@@ -172,7 +173,12 @@ export class Makers {
         if (this.chain.spotAgeSecs) {
           const age = await this.chain.spotAgeSecs(new PublicKey(r.asset)).catch(() => 0);
           if (age > asset.maxSpotAgeSecs - SPOT_AGE_MARGIN_SECS) {
-            if (!this.staleLogged.has(r.pubkey)) { log.info("push feed stale, holding take", { round: r.pubkey, ageSecs: age, max: asset.maxSpotAgeSecs }); this.staleLogged.add(r.pubkey); }
+            // take_round is only legal until pool_open (AuctionOver after it) — log every hold (≤ 1 per 10 s per round).
+            const last = this.staleLogged.get(r.pubkey) ?? 0;
+            if (Date.now() - last >= 10_000) {
+              this.staleLogged.set(r.pubkey, Date.now());
+              log.info("push feed stale, holding take", { round: r.pubkey, bot: b.profile.name, ageSecs: age, max: asset.maxSpotAgeSecs, secsToTakeDeadline: takeDeadline(r) - Math.floor(Date.now() / 1000) });
+            }
             break;
           }
         }

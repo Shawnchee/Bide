@@ -7,6 +7,7 @@ import type { ChainSnapshot, PlanState } from "./chain/types.js";
 import type { DeskTools, PlanView, PriceCell, EpochKind as DeskEpochKind } from "./desk/types.js";
 import type { JupiterReference } from "./jupiter/reference.js";
 import { quickEpochTargets, stdEpochTargets } from "./keeper/schedule.js";
+import { roundEndsBeforeWindow } from "./keeper/plan.js";
 
 /** Expiries ≤ 1 h away are quick epochs (quick plans cap max_expiry at 1 h; std rounds need ≥ 12 h). */
 export const isQuickHorizon = (expiry: number, now: number) => expiry - now <= 3_600;
@@ -110,7 +111,12 @@ export class WorkerDeskTools implements DeskTools {
     const p = snap?.plans.find((x) => x.pubkey === plan_id);
     if (!p) throw new Error(`plan ${plan_id} not found on-chain`);
     const a = snap!.assets.find((x) => x.pubkey === p.asset)!;
-    return planView(p, a.symbol, a.mint, a.decimals, a.strikeTick.toString(), fee_bps, this.openEpochs(snap, a.symbol));
+    const view = planView(p, a.symbol, a.mint, a.decimals, a.strikeTick.toString(), fee_bps, this.openEpochs(snap, a.symbol));
+    // A quick plan's Live round that settles before the targeted window opens: the keeper submits only once the plan is
+    // idle, so show the plan as it will be then (otherwise the Quant reads "active round" as a reason to skip).
+    const now = Math.floor((this.d.now ?? Date.now)() / 1000);
+    if (roundEndsBeforeWindow(snap!, p, now)) view.active_round = null;
+    return view;
   }
 
   private draftView(id: string, d: PlanDraft, snap: ChainSnapshot | null, fee_bps: number): PlanView {

@@ -39,6 +39,14 @@ export class SupabaseRepo implements Repo {
     await this.updateDeskRun(id, { steps: [...(cur.steps ?? []), step] });
   }
   async getDeskRun(id: string) { return check(await this.db.from("desk_runs").select("*").eq("id", id).maybeSingle(), "get desk run") as DeskRunRow | null; }
+  async abandonStaleDeskRuns(before: string) {
+    const d = check(
+      await this.db.from("desk_runs").update({ status: "abandoned", error_code: "WorkerRestart", updated_at: new Date().toISOString() })
+        .eq("status", "running").lt("created_at", before).select("id"),
+      "abandon stale desk runs",
+    ) as { id: string }[] | null;
+    return d?.length ?? 0;
+  }
   async upsertPlans(rows: PlanRow[]) { if (rows.length) check(await this.db.from("plans").upsert(rows.map((r) => ({ ...r, updated_at: new Date().toISOString() }))), "upsert plans"); }
   async upsertRounds(rows: RoundRow[]) {
     if (!rows.length) return;

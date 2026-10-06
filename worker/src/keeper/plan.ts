@@ -1,5 +1,5 @@
 // Keeper decisions as a pure function of (chain snapshot, now). keeper/index.ts executes them.
-import { notionalOf, poolWindowStart } from "../chain/auction.js";
+import { notionalOf, poolWindowStart, publicCancelAt } from "../chain/auction.js";
 import type { ChainSnapshot, PlanState, PoolState, RoundState } from "../chain/types.js";
 import {
   bucketStart, canOpenRound, DEFAULT_AUCTION_SECS, dueBuckets, isValidEpochExpiry, popcount, quickEpochTargets,
@@ -23,7 +23,12 @@ export interface KeeperOpts {
   quickEnabled: boolean;
   /** Epoch pubkey derivation for open_epoch dedupe: (asset, kind, expiry) → pubkey. */
   epochKey: (asset: string, kind: EpochKind, expiry: number) => string;
+  /** Rounds whose pool_take_round failed with a program error a later tick can't clear → cancel instead. */
+  poolGaveUp?: ReadonlySet<string>;
 }
+
+/** Stop trying pool_take_round this many seconds before its on-chain deadline (pool_open + 60 s) and cancel instead. */
+export const POOL_TAKE_MARGIN_SECS = 3;
 
 /** Can the pool legally take this round right now (mirror of pool_take_round's cap checks)? */
 export function poolCanTake(pool: PoolState | null, r: RoundState, assetDecimals: number, now: number): { ok: boolean; reason?: string } {
@@ -62,12 +67,18 @@ export function planKeeperActions(s: ChainSnapshot, now: number, opts: KeeperOpt
     }
   }
 
-  // 2. Untaken auctions past the pool window → pool_take_round if caps allow, else cancel.
+  // 2. Untaken auctions past the pool window. take_round is only legal until pool_open (AuctionOver after it), so from
+  //    pool_open on only the pool can fill the round: pool_take_round while [pool_open, pool_open + 60 − margin] and the
+  //    caps allow (the executor holds — no tx — while the push feed is stale), else cancel. Past the pool's deadline,
+  //    or after a pool failure a retry can't clear → cancel (before: a failing pool take was retried forever).
   for (const r of s.rounds.filter((x) => x.status === "Auction")) {
     if (now < poolWindowStart(r)) continue;
     const dec = assetsByPk.get(r.asset)?.decimals ?? 9;
     const can = poolCanTake(s.pool, r, dec, now);
-    out.push(can.ok ? { type: "pool_take_round", round: r.pubkey } : { type: "cancel_round", round: r.pubkey, reason: can.reason! });
+    const gaveUp = opts.poolGaveUp?.has(r.pubkey) ?? false;
+    const late = now > publicCancelAt(r) - POOL_TAKE_MARGIN_SECS;
+    if (can.ok && !gaveUp && !late) out.push({ type: "pool_take_round", round: r.pubkey });
+    else out.push({ type: "cancel_round", round: r.pubkey, reason: !can.ok ? can.reason! : gaveUp ? "pool take failed" : "pool window passed" });
   }
 
   // 3–4. Epoch sampling / resolution, only for epochs that carry rounds (empty epochs just lapse — saves SOL).
@@ -99,13 +110,29 @@ export function planKeeperActions(s: ChainSnapshot, now: number, opts: KeeperOpt
       if (idle) out.push({ type: "desk_flip", plan: p.pubkey });
       continue;
     }
-    if (!idle || p.paused || p.sizeFilled >= p.sizeTotal) continue;
+    // Quick plans: a Live round whose epoch expires by the next window's opening second resolves ~10 s into that
+    // window — too late for a desk that starts then (50–90 s), so every plan used to get a round only every 20 min.
+    // Run the desk during the lead anyway; the executor holds the open_round until the plan is idle.
+    const chained = !idle && roundEndsBeforeWindow(s, p, now);
+    if ((!idle && !chained) || p.paused || p.sizeFilled >= p.sizeTotal) continue;
     const kind: EpochKind = p.quick ? "Quick" : "Std";
     if (kind === "Quick" && !opts.quickEnabled) continue;
     if (!inAuctionWindow(kind, now)) continue;
     out.push({ type: "desk_open_round", plan: p.pubkey, kind });
   }
   return out;
+}
+
+/**
+ * Quick plan whose only blocker is a Live round in an epoch that expires at or before the opening second of the quick
+ * auction window the desk would target now (it will be resolved early in that window). Pending settlement → false.
+ */
+export function roundEndsBeforeWindow(s: Pick<ChainSnapshot, "rounds">, p: Pick<PlanState, "quick" | "activeRound" | "pendingSettlement">, now: number): boolean {
+  if (!p.quick || !p.activeRound || p.pendingSettlement) return false;
+  const target = quickTargetExpiry(now);
+  if (target === null) return false;
+  const r = s.rounds.find((x) => x.pubkey === p.activeRound);
+  return !!r && r.status === "Live" && r.expiry <= target - 600;
 }
 
 /** An Active, unpaused, unfilled quick plan on `asset` whose horizon has not ended. */

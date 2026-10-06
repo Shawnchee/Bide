@@ -14,7 +14,9 @@ const SOL_PARAMS = {
   strikeTick: 100_000n, // $0.10
   maxConfBps: 50,
   maxSpotMoveBps: 50,
-  maxSpotAgeSecs: 180, // upgraded devnet push feeds update every 61–70 s (P2)
+  // Devnet only: the sponsored push feed usually updates every 61–70 s but gaps of 227–320 s were seen on 6 Oct, which
+  // left makers unable to take (StalePrice). 300 s is a weaker guard than mainnet's 30 s — stated in the README.
+  maxSpotAgeSecs: 300,
   enabled: true,
 };
 
@@ -26,7 +28,15 @@ async function main() {
   if (!(await exists(assetPda(WSOL_MINT)[0]))) {
     console.log("add_asset SOL", explorer(await send([await client.addAsset(admin.publicKey, WSOL_MINT, SOL_PARAMS)], [admin])));
   } else if (process.argv.includes("--update")) {
-    console.log("update_asset SOL", explorer(await send([await client.updateAsset(admin.publicKey, WSOL_MINT, SOL_PARAMS)], [admin])));
+    // Keep every on-chain field as it is except max_spot_age_secs (no silent clobbering of later tuning).
+    const cur = await client.fetchAsset(WSOL_MINT);
+    const params = {
+      ...SOL_PARAMS,
+      spotFeed: cur.spotFeed, strikeTick: BigInt(cur.strikeTick.toString()), maxConfBps: cur.maxConfBps, maxSpotMoveBps: cur.maxSpotMoveBps,
+      enabled: cur.enabled, pythFeedIdHex: Buffer.from(cur.pythFeedId).toString("hex"),
+    };
+    console.log("update_asset SOL", { maxSpotAgeSecs: `${cur.maxSpotAgeSecs} -> ${params.maxSpotAgeSecs}` });
+    console.log("update_asset SOL", explorer(await send([await client.updateAsset(admin.publicKey, WSOL_MINT, params)], [admin])));
   } else console.log("SOL asset exists (pass --update to re-apply params)");
   const cfg = await client.fetchConfig();
   const a = await client.fetchAsset(WSOL_MINT);

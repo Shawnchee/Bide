@@ -158,3 +158,83 @@ test("quick desk lead: desk may start 90 s early; held until the window opens; m
   const q = eligibleExpiries({ quick: true, maxExpirySecs: 3600, horizonEnd: e + 3600 }, e - 650);
   assert.deepEqual(q, [e]);
 });
+
+// ---- data-flow fixes (6 Oct): pool window deadline, give-up, stale-feed hold ----
+test("untaken auction: pool take only inside [pool_open, pool_open + 60 − margin]; then cancel; give-up → cancel", () => {
+  const r = round(); // pool_open = 1090, pool deadline (permissionless cancel) = 1150
+  const acts = (now: number, o: Partial<typeof opts> & { poolGaveUp?: Set<string> } = {}) =>
+    planKeeperActions(snap({ rounds: [r] }), now, { ...opts, ...o }).filter((x) => x.type.includes("round"));
+  assert.deepEqual(types(acts(1146)), ["pool_take_round"]);
+  const late = acts(1148);
+  assert.deepEqual(types(late), ["cancel_round"]);
+  assert.equal((late[0] as any).reason, "pool window passed");
+  const gaveUp = acts(1095, { poolGaveUp: new Set(["Round1"]) });
+  assert.deepEqual(types(gaveUp), ["cancel_round"]);
+  assert.equal((gaveUp[0] as any).reason, "pool take failed");
+  // No pool: makers can't take after pool_open (AuctionOver), so cancelling at pool_open loses nothing.
+  assert.equal((planKeeperActions(snap({ rounds: [r], pool: null }), 1090, opts)[0] as any)?.reason ?? (planKeeperActions(snap({ rounds: [r], pool: null }), 1090, opts).find((x) => x.type === "cancel_round") as any).reason, "no pool");
+});
+
+import { Keeper as KeeperExec } from "../src/keeper/index.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
+import { MemoryRepo } from "../src/db/memory.js";
+test("keeper holds pool_take_round (no tx, no backoff) while the push feed is stale; gives up on a non-retryable error", async () => {
+  const roundPk = Keypair.generate().publicKey.toBase58();
+  const assetPk = Keypair.generate().publicKey.toBase58();
+  const r = round({ pubkey: roundPk, asset: assetPk });
+  let age = 590; // max 600 − margin 15 → stale
+  const takes: string[] = [];
+  let fail: Error | null = null;
+  const chain: any = {
+    programId: new PublicKey("4bwTwLAZqPMLSbdvQQ9UrePJiRBUKgiA8TKV3ydo4tqe"),
+    spotAgeSecs: async () => age,
+    poolTakeRound: async (_kp: Keypair, pk: PublicKey) => { if (fail) throw fail; takes.push(pk.toBase58()); return "PoolSig"; },
+    cancelRound: async () => "CancelSig",
+  };
+  const s = snap({ now: 1100, rounds: [r], assets: [{ ...snap({}).assets[0]!, pubkey: assetPk }] });
+  const snapshots: any = { get: async () => s, invalidate() {}, peek: () => s };
+  const k = new KeeperExec({ chain, snapshots, signer: Keypair.generate(), repo: new MemoryRepo(), desk: null, quickEnabled: false });
+  await k.tick();
+  assert.equal(takes.length, 0, "held while stale");
+  age = 20;
+  await k.tick();
+  assert.deepEqual(takes, [roundPk], "taken once fresh, immediately (hold left no backoff)");
+  // Non-retryable program error → the next plan cancels instead of retrying until the deadline.
+  takes.length = 0;
+  const e: any = new Error("failed"); e.logs = ["Program log: AnchorError Error Code: PoolCapExceeded. Error Number: 6028."]; fail = e;
+  const k2 = new KeeperExec({ chain, snapshots, signer: Keypair.generate(), repo: new MemoryRepo(), desk: null, quickEnabled: false });
+  await k2.tick();
+  const planned = planKeeperActions(s, 1100, { ...opts, poolGaveUp: (k2 as any).poolGaveUp });
+  assert.equal((planned.find((x) => x.type === "cancel_round") as any)?.reason, "pool take failed");
+});
+
+import { roundEndsBeforeWindow } from "../src/keeper/plan.js";
+test("chained quick desk: a Live round expiring at the next window's open doesn't block the desk lead; later ones do", () => {
+  const W = t("2026-10-05T15:00:00Z"); // window for the 15:10 epoch opens at 15:00
+  const now = W - 60; // inside the 90 s lead
+  const live = (expiry: number, status: RoundState["status"] = "Live") => round({ pubkey: "R", plan: "Plan1", expiry, status });
+  const q = (r: RoundState, o: Partial<PlanState> = {}) =>
+    types(planKeeperActions(snap({ plans: [plan({ quick: true, activeRound: "R", ...o })], rounds: [r] }), now, { ...opts, quickEnabled: true }).filter((x) => x.type === "desk_open_round"));
+  assert.deepEqual(q(live(W)), ["desk_open_round"], "round in the 15:00 epoch resolves at window open");
+  assert.deepEqual(q(live(W + 600)), [], "round in the targeted epoch itself");
+  assert.deepEqual(q(live(W, "Auction")), [], "untaken auction still pending");
+  assert.deepEqual(q(live(W), { pendingSettlement: "R" }), [], "exercise settlement pending");
+  assert.ok(!roundEndsBeforeWindow({ rounds: [live(W)] }, { quick: false, activeRound: "R", pendingSettlement: null }, now), "std plans never chain");
+});
+
+import { planDemoActions } from "../src/demo/plans.js";
+test("demo plans: create missing buy/sell near spot; close only idle plans whose strike drifted > 0.5 %", () => {
+  const assets = [{ ...snap({}).assets[0]!, strikeTick: 100_000n }];
+  const now = 1_000_000;
+  const spot = 120_340_000n;
+  const mine = (o: Partial<PlanState>) => plan({ owner: "Demo", quick: true, horizonEnd: now + 3600, ...o });
+  const a0 = planDemoActions({ plans: [], assets }, "Demo", spot, now);
+  assert.deepEqual(a0.map((a: any) => [a.type, a.side, a.strike]), [["create", "buy", 120_300_000n], ["create", "sell", 120_400_000n]]);
+  const buy = mine({ pubkey: "B", side: "Buy", targetStrike: 119_500_000n });
+  const sell = mine({ pubkey: "S", side: "Sell", exitStrike: 120_400_000n });
+  const a1 = planDemoActions({ plans: [buy, sell], assets }, "Demo", spot, now);
+  assert.deepEqual(a1.map((a) => a.type + ":" + ("plan" in a ? a.plan : "")), ["close:B"], "buy strike 0.7 % away → close; sell at spot → keep");
+  assert.equal(planDemoActions({ plans: [{ ...buy, activeRound: "R" }, sell], assets }, "Demo", spot, now).length, 0, "never close a plan with a round");
+  assert.deepEqual(planDemoActions({ plans: [{ ...buy, owner: "Someone" }, sell], assets }, "Demo", spot, now).map((a) => a.type), ["create"], "other owners' plans are ignored");
+  assert.deepEqual(planDemoActions({ plans: [{ ...buy, status: "Filled" }, sell], assets }, "Demo", spot, now).map((a: any) => a.side), ["buy"], "filled → re-create");
+});

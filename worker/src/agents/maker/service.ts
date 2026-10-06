@@ -92,16 +92,16 @@ export class MakerAgents {
     if (e) return e;
     const asset = s.assets.find((a) => a.pubkey === round.asset);
     const epoch = s.epochs.find((x) => x.pubkey === round.epoch);
-    if (asset && epoch) this.ensure(s, asset, epoch, kind, maker);
+    if (asset && epoch) this.ensure(s, asset, epoch, kind, maker, round.strike);
     return this.cache.get(key);
   }
 
-  private ensure(s: ChainSnapshot, asset: AssetState, epoch: EpochState, kind: RoundKindLc, maker: string) {
+  private ensure(s: ChainSnapshot, asset: AssetState, epoch: EpochState, kind: RoundKindLc, maker: string, roundStrike?: bigint) {
     const key = stanceKey(asset.pubkey, epoch.pubkey, kind);
     const ck = `${key}|${maker}`;
     if (this.cache.has(ck)) return;
     this.cache.set(ck, { status: "pending" });
-    this.decide(s, asset, epoch, kind, maker, key)
+    this.decide(s, asset, epoch, kind, maker, key, roundStrike)
       .then((row) => this.cache.set(ck, { status: "ready", row }))
       .catch((e) => { log.warn("stance failed", { maker, slot: key, err: (e as Error).message }); this.cache.delete(ck); });
   }
@@ -112,7 +112,7 @@ export class MakerAgents {
     return this.calls.length < this.d.cfg.makerMaxCallsPerHour;
   }
 
-  private async decide(s: ChainSnapshot, asset: AssetState, epoch: EpochState, kind: RoundKindLc, maker: string, key: string): Promise<MakerStanceRow & { id: string }> {
+  private async decide(s: ChainSnapshot, asset: AssetState, epoch: EpochState, kind: RoundKindLc, maker: string, key: string, roundStrike?: bigint): Promise<MakerStanceRow & { id: string }> {
     const existing = await this.d.repo.getMakerStance(key, maker).catch(() => null);
     if (existing?.id) return existing as MakerStanceRow & { id: string };
     const persona = personaFor(maker);
@@ -121,7 +121,7 @@ export class MakerAgents {
     if (!persona) decision = fallback(`no persona for ${maker}`);
     else if (!this.underQuota()) decision = fallback(`quota guard: ${this.d.cfg.makerMaxCallsPerHour} maker calls per hour`);
     else {
-      ctx = await this.context(s, asset, epoch, kind, maker);
+      ctx = await this.context(s, asset, epoch, kind, maker, roundStrike);
       const priced = ctx.price_grid.some((c) => c.fair_usd !== null);
       if (!ctx.spot || !priced) decision = fallback("no market data to decide on (spot or price grid unavailable)");
       else {
@@ -143,7 +143,7 @@ export class MakerAgents {
   }
 
   /** Public inputs only (see FORBIDDEN_CONTEXT_KEYS). Each tool failure becomes null; nothing is invented. */
-  async context(s: ChainSnapshot, asset: AssetState, epoch: EpochState, kind: RoundKindLc, maker: string): Promise<StanceContext> {
+  async context(s: ChainSnapshot, asset: AssetState, epoch: EpochState, kind: RoundKindLc, maker: string, roundStrike?: bigint): Promise<StanceContext> {
     const t = this.d.tools;
     const nowS = Math.floor(this.now() / 1000);
     const sym = asset.symbol;
@@ -151,12 +151,9 @@ export class MakerAgents {
     const spotUsd = spot ? Number(BigInt(spot.price)) / 1e6 : null;
     const moves = await t.spot_moves({ asset: sym }).catch(() => null);
     const tick = asset.strikeTick > 0n ? asset.strikeTick : 1_000_000n;
-    const snap = (usdPrice: number, up: boolean) => {
-      const base = BigInt(Math.round(usdPrice * 1e6));
-      const q = base / tick;
-      return ((up && q * tick < base ? q + 1n : q) * tick).toString();
-    };
-    const strikes = spotUsd ? (kind === "put" ? [snap(spotUsd * 0.98, false), snap(spotUsd * 0.95, false)] : [snap(spotUsd * 1.02, true), snap(spotUsd * 1.05, true)]) : [];
+    const strikes = spotUsd ? referenceStrikes(epoch.kind === "Quick" ? "Quick" : "Std", kind, spotUsd, tick) : [];
+    // A stance triggered by an open round also prices that round's own strike (public on-chain data, not a plan bound).
+    if (roundStrike && roundStrike > 0n) strikes.unshift(roundStrike.toString());
     const uniq = [...new Set(strikes)];
     const size = (10n ** BigInt(asset.decimals)).toString();
     const grid = uniq.length ? await t.price_grid({ asset: sym, kind, strikes: uniq, expiries: [epoch.expiry], size }).catch(() => null) : null;
@@ -201,6 +198,25 @@ export class MakerAgents {
     };
     return ctx;
   }
+}
+
+/**
+ * Reference strikes (base units, on tick) for a stance's price grid. They must be strikes a round in this epoch could
+ * plausibly use, or every fair is ≈ 0 and the LLM can only pass: a 10-min quick epoch's 1σ move is ≈ 0.2 % (≈ 2–3 SOL
+ * ticks), so quick → 1 and 2 ticks out of the money; std (≥ 12 h) → 2 % and 5 % OTM.
+ */
+export function referenceStrikes(epochKind: "Quick" | "Std", kind: RoundKindLc, spotUsd: number, tick: bigint): string[] {
+  const base = BigInt(Math.round(spotUsd * 1e6));
+  const down = (x: bigint) => (x / tick) * tick;
+  const up = (x: bigint) => { const q = x / tick; return (q * tick < x ? q + 1n : q) * tick; };
+  if (epochKind === "Quick") {
+    // Nearest OTM tick, then one more (puts below spot, calls above).
+    if (kind === "put") { const k1 = down(base - 1n); return [k1, k1 - tick].filter((k) => k > 0n).map(String); }
+    const k1 = up(base + 1n);
+    return [k1, k1 + tick].map(String);
+  }
+  const pct = (p: number) => BigInt(Math.round(spotUsd * p * 1e6));
+  return kind === "put" ? [down(pct(0.98)), down(pct(0.95))].map(String) : [up(pct(1.02)), up(pct(1.05))].map(String);
 }
 
 const rn = (x: number | null | undefined) => (x === null || x === undefined ? null : r(x, 2));

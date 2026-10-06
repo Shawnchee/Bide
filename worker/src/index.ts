@@ -9,7 +9,8 @@ import { SnapshotCache } from "./chain/snapshot-cache.js";
 import { initRepo } from "./db/index.js";
 import { createDeskFromEnv, createZaiTransport, readDeskConfig, type Desk } from "./desk/index.js";
 import { describeAgentEnv, readAgentConfig } from "./agents/config.js";
-import { LlmQueue, PRIORITY } from "./agents/queue.js";
+import { LlmQueue, PRIORITY, RunGate } from "./agents/queue.js";
+import { readHttpLimits } from "./http/limits.js";
 import { MakerAgents } from "./agents/maker/service.js";
 import { makerPnl } from "./agents/outcomes.js";
 import { IntakeService } from "./agents/intake.js";
@@ -25,11 +26,17 @@ import { Scheduler } from "./loops/scheduler.js";
 import { Makers } from "./makers/index.js";
 import { topUpWsol } from "./makers/wsol.js";
 import { Pricer } from "./pricer/index.js";
+import { DemoPlans } from "./demo/plans.js";
+import { FEED_IDS, getLatestPrice } from "./pyth/hermes.js";
 
 const log = logger("main");
 log.info("starting bide-worker", { env: envReport(), rpc: new URL(cfg.rpcUrl).host });
 
 const repo = await initRepo();
+// Desk runs left `running` by the previous process (restart/redeploy) can never finish: mark them abandoned.
+await repo.abandonStaleDeskRuns(new Date().toISOString())
+  .then((n) => { if (n) log.info("marked stale desk runs abandoned", { n }); })
+  .catch((e) => log.warn("abandon stale desk runs failed", { err: (e as Error).message }));
 const pricer = new Pricer(["SOL"]);
 const jupiter = new JupiterReference(repo);
 const snapshots = new SnapshotCache(null);
@@ -40,13 +47,20 @@ const deskTools = new WorkerDeskTools({ pricer, jupiter, chain: null, getSnapsho
 // AI agents v2: every GLM call (desk, intake, maker stances) goes through one serial queue (desk first).
 const agentCfg = readAgentConfig();
 const deskCfg = readDeskConfig();
-const llmQueue = new LlmQueue();
+const httpLimits = readHttpLimits();
+// Keeper desk (0) > maker stances (1) > public previews/intake (2); public work is 1 in flight with a bounded backlog.
+const llmQueue = new LlmQueue({ maxLowInFlight: 1, maxLowPending: 8, highBypassesLow: (process.env.LLM_HIGH_BYPASS_LOW ?? "1") !== "0" });
+const publicGate = new RunGate({ maxInFlight: 1, maxWaiting: httpLimits.lowBacklog, holdTimeoutMs: 180_000 });
 const zai = createZaiTransport({ apiKey: deskCfg.zai.apiKey, baseUrl: deskCfg.zai.baseUrl, timeoutMs: deskCfg.zai.timeoutMs });
 log.info("agents", { env: describeAgentEnv(), makerLlm: agentCfg.makerLlm, intake: agentCfg.intakeEnabled, model: agentCfg.model });
 let makerNames: Record<string, string> = {};
 deskTools.setOutcomeSource(repo, () => makerNames);
 let desk: Desk | null = null;
-try { desk = createDeskFromEnv(deskTools, process.env, deskCfg, (t) => llmQueue.wrap(t, PRIORITY.desk)); } catch (e) { log.warn("desk unavailable", { err: (e as Error).message }); }
+let previewDesk: Desk | null = null;
+try {
+  desk = createDeskFromEnv(deskTools, process.env, deskCfg, (t) => llmQueue.wrap(t, PRIORITY.desk));
+  previewDesk = createDeskFromEnv(deskTools, process.env, deskCfg, (t) => llmQueue.wrap(t, PRIORITY.preview));
+} catch (e) { log.warn("desk unavailable", { err: (e as Error).message }); }
 
 const sched = new Scheduler();
 
@@ -113,6 +127,13 @@ async function tryStartChain() {
     }
     sched.add("makers", 2_000, () => makers.tick());
   } else log.warn("makers off", { enableMakers: cfg.enableMakers, count: makerKeys.length });
+  // Devnet demo plans (opt-in): keeps one quick buy + one quick sell plan near spot for a dedicated demo wallet.
+  const demoOwner = loadKeypair("DEMO_OWNER_KEYPAIR");
+  if (demoOwner && cfg.quickPlansEnabled) {
+    const demoChain = await loadAnchorChain("demo");
+    const demo = new DemoPlans(demoChain.connection, demoChain.programId, demoOwner, () => getLatestPrice(FEED_IDS.SOL).then((p) => p.price).catch(() => null));
+    sched.add("demo-plans", 30_000, async () => { await demo.tick(await snapshots.get()); }, { initialDelayMs: 20_000 });
+  }
 }
 // Maker P&L ledger: settlement value − premium paid, written when a maker-taken round resolves.
 const mirror = new Mirror(snapshots, repo, async (o) => {
@@ -124,9 +145,9 @@ const mirror = new Mirror(snapshots, repo, async (o) => {
 sched.add("chain-init", 60_000, async () => { await tryStartChain(); if (chainLoopsStarted) return; log.info("chain not ready", { reason: chainStatus }); });
 
 const intake = agentCfg.intakeEnabled
-  ? new IntakeService({ repo, transport: llmQueue.wrap(zai, PRIORITY.intake), model: agentCfg.model, timeoutMs: agentCfg.intakeTimeoutMs, maxPerMinute: agentCfg.intakeMaxPerMinute, quickEnabled: cfg.quickPlansEnabled, spot: () => pricer.get("SOL")?.spot?.price ?? null })
+  ? new IntakeService({ repo, transport: llmQueue.wrap(zai, PRIORITY.intake), model: agentCfg.model, timeoutMs: agentCfg.intakeTimeoutMs, maxPerMinute: agentCfg.intakeMaxPerMinute, quickEnabled: cfg.quickPlansEnabled, spot: () => pricer.get("SOL")?.spot?.price ?? null, admit: () => publicGate.tryEnter() })
   : null;
-const app = buildApp({ pricer, repo, desk, deskTools, intake, loopStats: () => sched.stats(), status: () => ({ chain: chainStatus, agents: { makerLlm: agentCfg.makerLlm, intake: !!intake, llmQueue: llmQueue.stats } }) });
+const app = buildApp({ pricer, repo, desk, previewDesk, gate: publicGate, limits: { ...httpLimits, intakePerMinute: agentCfg.intakeMaxPerMinute }, deskTools, intake, loopStats: () => sched.stats(), status: () => ({ chain: chainStatus, agents: { makerLlm: agentCfg.makerLlm, intake: !!intake, llmQueue: llmQueue.stats, publicGate: publicGate.load } }) });
 serve({ fetch: app.fetch, port: cfg.port, hostname: process.env.HOST ?? "127.0.0.1" }, (i) => log.info("http listening", { port: i.port }));
 
 // Host-suspension detector: on a laptop, sleep freezes every timer (run #2 saw a 5-min clamshell sleep mid-loop).
