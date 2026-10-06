@@ -1,7 +1,7 @@
 "use client";
 
 import { Skeleton } from "@/components/ui/skeleton";
-import { MAKER_PERSONAS } from "@/components/agents/maker-bids";
+import { buyerName } from "@/components/agents/maker-bids";
 import type { RoundRow } from "@/lib/types";
 import { useTable } from "@/hooks/use-table";
 
@@ -35,7 +35,7 @@ function stats(rows: RoundRow[]) {
   const wins: Record<string, number> = {};
   for (const r of taken) {
     const i = r.maker ? BOTS.indexOf(r.maker) : -1;
-    const w = r.is_pool ? "Pool" : i >= 0 ? (MAKER_PERSONAS[`maker-${i + 1}`] ?? `Maker ${i + 1}`) : "Other";
+    const w = r.is_pool ? "Backstop" : i >= 0 ? buyerName(`maker-${i + 1}`) : "Outside buyer";
     wins[w] = (wins[w] ?? 0) + 1;
   }
   const median = secs.length ? (secs.length % 2 ? secs[(secs.length - 1) / 2]! : (secs[secs.length / 2 - 1]! + secs[secs.length / 2]!) / 2) : null;
@@ -53,26 +53,26 @@ function stats(rows: RoundRow[]) {
 
 const pctS = (x: number | null) => (x === null ? "—" : `${Math.round(x * 100)}%`);
 
-/** "What the desk learned": the deterministic statistics the Quant reads through recent_outcomes and must cite. */
+/** "How recent rounds went": the deterministic statistics the Quant reads through recent_outcomes and must cite. */
 export function TrackRecord() {
   const rounds = useTable<RoundRow>({ table: "rounds", orderBy: "auction_start", ascending: false, limit: N, pollMs: 15_000 });
   if (rounds.status === "unconfigured" || rounds.status === "error") return null;
   if (rounds.status === "loading") return <Skeleton className="h-32 w-full" />;
   const s = stats(rounds.rows);
   const cells: [string, string, string?][] = [
-    ["Fill rate", pctS(s.fillRate), `${s.finished} finished auctions`],
-    ["Paid ÷ start price", s.fillOverStart === null ? "—" : s.fillOverStart.toFixed(2), "how far the price fell"],
-    ["Median time to fill", s.medianSecs === null ? "—" : `${s.medianSecs} s`, "from auction start"],
-    ["Untaken", String(s.untaken), "auctions nobody took"],
-    ["Filled at expiry", pctS(s.exerciseRate), `${s.resolved} settled rounds`],
+    ["A buyer paid", pctS(s.fillRate), `of ${s.finished} finished rounds`],
+    ["Final pay vs first ask", pctS(s.fillOverStart), "average, when a buyer paid"],
+    ["Typical wait for a buyer", s.medianSecs === null ? "—" : `${s.medianSecs} s`, "middle value"],
+    ["No buyer", String(s.untaken), "rounds nobody paid for"],
+    ["Filled at your price", pctS(s.exerciseRate), `of ${s.resolved} ended rounds`],
   ];
   return (
     <section aria-labelledby="track-h" className="grid gap-3">
       <div className="grid gap-1">
         <h2 id="track-h" className="text-sm font-semibold">
-          What the desk learned
+          How recent rounds went
         </h2>
-        <p className="max-w-3xl text-xs text-muted-foreground">Last {N} rounds. The desk must cite these; they never change your limits.</p>
+        <p className="max-w-3xl text-xs text-muted-foreground">Last {N} rounds. The AI reads these; your limits never change.</p>
       </div>
       {rounds.rows.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border p-5 text-sm text-muted-foreground">No finished rounds yet.</p>
@@ -89,7 +89,7 @@ export function TrackRecord() {
       )}
       {Object.keys(s.wins).length > 0 && (
         <p className="text-xs text-muted-foreground">
-          Who took the rounds:{" "}
+          Who paid:{" "}
           {Object.entries(s.wins)
             .map(([k, v]) => `${k} ${v}`)
             .join(" · ")}

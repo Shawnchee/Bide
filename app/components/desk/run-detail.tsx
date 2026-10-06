@@ -13,7 +13,7 @@ const QUESTION_LABEL: Record<string, string> = {
   event_risk: "Event risk",
   data_quality: "Data quality",
   user_fit: "Fits the user's patience",
-  explanation_ok: "Rationale matches the numbers",
+  explanation_ok: "Reasons match the numbers",
 };
 
 function Bars({ answers }: { answers: RiskAnswersLike }) {
@@ -52,10 +52,10 @@ function Json({ value }: { value: unknown }) {
 export function proposalLine(p: Record<string, unknown> | null | undefined): string | null {
   if (!p) return null;
   const parts: string[] = [];
-  if (p.strike) parts.push(`strike ${usdcPrice(p.strike as string)}`);
+  if (p.strike) parts.push(`at ${usdcPrice(p.strike as string)}`);
   if (p.size) parts.push(`${Number(p.size) / 1e9} SOL`);
   if (p.expiry) parts.push(`ends ${dateTimeUtc(p.expiry as number)}`);
-  if (p.premium_floor) parts.push(`floor ${usdc(p.premium_floor as string)}`);
+  if (p.premium_floor) parts.push(`min pay ${usdc(p.premium_floor as string)}`);
   return parts.length ? parts.join(" · ") : null;
 }
 
@@ -64,6 +64,8 @@ export function RunDetail({ run, trigger, onChainMemoHash }: { run: DeskRunRow; 
   const traces = runToolTraces(run.memo);
   const proposal = (run.final?.proposal ?? run.proposal) as Record<string, unknown> | null;
   const rationale = (proposal?.rationale as string) ?? null;
+  const retry = Boolean((run.memo as { inputs?: { chain_retry?: unknown } } | null)?.inputs?.chain_retry);
+  const cites = (run.memo as { outcomes_cited?: boolean | null } | null)?.outcomes_cited === true;
   const matches = onChainMemoHash && run.memo_hash ? onChainMemoHash.replace(/^0x/, "") === run.memo_hash.replace(/^0x/, "") : null;
 
   return (
@@ -71,22 +73,27 @@ export function RunDetail({ run, trigger, onChainMemoHash }: { run: DeskRunRow; 
       <SheetTrigger asChild>{trigger}</SheetTrigger>
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
         <SheetHeader>
-          <SheetTitle className="font-display text-xl">Why this?</SheetTitle>
+          <SheetTitle className="font-display text-xl">Details</SheetTitle>
           <SheetDescription>
-            Desk run {timeAgo(run.created_at)} · {run.kind}
+            {timeAgo(run.created_at)} · the full record, for anyone checking.
           </SheetDescription>
         </SheetHeader>
         <div className="grid gap-8 px-4 pb-10">
           <section className="grid gap-2">
-            <h3 className="text-xs font-semibold text-muted-foreground">Decision</h3>
+            <h3 className="text-xs font-semibold text-muted-foreground">What happened</h3>
+            {(retry || cites) && (
+              <p className="text-xs text-muted-foreground">
+                {[retry && "Retry after a Solana rejection", cites && "Used past round results"].filter(Boolean).join(" · ")}
+              </p>
+            )}
             <p className="text-[15px] leading-snug font-medium">{run.final?.reason ?? rationale ?? run.final?.status ?? "—"}</p>
             {proposalLine(proposal) && <p className="num text-sm text-muted-foreground">{proposalLine(proposal)}</p>}
             {rationale && run.final?.reason && rationale !== run.final.reason && (
-              <p className="text-sm text-muted-foreground">Quant&apos;s rationale: {rationale}</p>
+              <p className="text-sm text-muted-foreground">AI&apos;s full why: {rationale}</p>
             )}
             {run.error_code && (
               <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-                {run.status === "rejected" && run.tx_sig ? "Rejected on-chain" : "Not sent (off-chain)"}: <span className="font-mono text-xs">{run.error_code}</span>
+                {run.status === "rejected" && run.tx_sig ? "Rejected by Solana rule" : "Not sent"}: <span className="font-mono text-xs">{run.error_code}</span>
                 {explainError(run.error_code) ? ` — ${explainError(run.error_code)}.` : ""}
               </p>
             )}
@@ -94,15 +101,15 @@ export function RunDetail({ run, trigger, onChainMemoHash }: { run: DeskRunRow; 
 
           {answers && (
             <section className="grid gap-3">
-              <h3 className="text-xs font-semibold text-muted-foreground">Risk&apos;s probabilities</h3>
+              <h3 className="text-xs font-semibold text-muted-foreground">Risk check scores</h3>
               <Bars answers={answers} />
             </section>
           )}
 
           {traces.length > 0 && (
             <section className="grid gap-2">
-              <h3 className="text-xs font-semibold text-muted-foreground">Tool calls ({traces.length})</h3>
-              <p className="text-xs text-muted-foreground">Every number the models used came from these code tools.</p>
+              <h3 className="text-xs font-semibold text-muted-foreground">Data the AI checked ({traces.length})</h3>
+              <p className="text-xs text-muted-foreground">Every number came from these code tools.</p>
               <ul className="grid gap-2">
                 {traces.map((t, i) => (
                   <li key={i} className="rounded-xl border border-border p-3">
@@ -135,21 +142,21 @@ export function RunDetail({ run, trigger, onChainMemoHash }: { run: DeskRunRow; 
           )}
 
           <section className="grid gap-2 rounded-xl bg-secondary p-4 text-sm">
-            <h3 className="font-medium">Proof</h3>
-            <p className="text-muted-foreground">The full memo is hashed (SHA-256) and the hash is stored in the round on-chain.</p>
-            <p className="font-mono break-all text-[11px]">{run.memo_hash ?? "no memo hash (no round was opened)"}</p>
-            {matches === true && <p className="text-primary">Matches the hash stored on-chain ✓</p>}
-            {matches === false && <p className="text-destructive">Does not match the on-chain hash.</p>}
+            <h3 className="font-medium">Proof on Solana</h3>
+            <p className="text-muted-foreground">A fingerprint of this full record is saved on Solana.</p>
+            <p className="font-mono break-all text-[11px]" title="SHA-256 memo hash">{run.memo_hash ?? "No fingerprint (no round was opened)"}</p>
+            {matches === true && <p className="text-primary">Matches the one saved on Solana ✓</p>}
+            {matches === false && <p className="text-destructive">Doesn&apos;t match the one on Solana.</p>}
             {run.tx_sig && (
               <p>
-                <ExplorerLink sig={run.tx_sig}>open_round transaction</ExplorerLink>
+                <ExplorerLink sig={run.tx_sig}>View the transaction</ExplorerLink>
               </p>
             )}
           </section>
 
           {run.memo && (
             <details className="text-sm">
-              <summary className="cursor-pointer font-medium">Full memo (JSON)</summary>
+              <summary className="cursor-pointer font-medium">Full record (JSON)</summary>
               <Json value={run.memo} />
             </details>
           )}
