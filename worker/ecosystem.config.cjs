@@ -17,7 +17,8 @@ module.exports = {
       script: "node_modules/.bin/tsx",
       args: "src/index.ts",
       interpreter: "none",
-      env: { ...fileEnv, NODE_ENV: "production", HOST: "127.0.0.1", PORT: "8787", LOG_LEVEL: "info" },
+      // HOST may be set in the env file (e.g. the Docker bridge IP so only the reverse proxy can reach it).
+      env: { ...fileEnv, NODE_ENV: "production", HOST: fileEnv.HOST || "127.0.0.1", PORT: fileEnv.PORT || "8787", LOG_LEVEL: "info" },
       autorestart: true,
       max_restarts: 1_000_000, // effectively never give up; exp backoff below spaces out a crash loop
       min_uptime: "20s",
