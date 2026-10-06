@@ -229,7 +229,11 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
   const earned = useMemo(() => roundRows.reduce((acc, r) => acc + (netPremium(r) ?? 0n), 0n), [roundRows]);
   const side = String(decoded?.side ?? plan?.side ?? "").toLowerCase();
   const buy = side !== "sell";
-  const target = decoded ? Number(decoded.targetStrike) / 1e6 : plan ? fromBase(plan.target_strike, 6) : null;
+  // Sell plans keep their price in exit_strike (target_strike is 0 for them).
+  const strikeOf = (t: unknown, x: unknown) => (buy ? t : x);
+  const target = decoded
+    ? Number(strikeOf(decoded.targetStrike, decoded.exitStrike) ?? 0) / 1e6
+    : plan ? fromBase(strikeOf(plan.target_strike, plan.exit_strike) as never, 6) : null;
   const sizeTotal = decoded ? Number(decoded.sizeTotal) / 1e9 : plan ? fromBase(plan.size_total, 9) : null;
   const sizeFilled = decoded ? Number(decoded.sizeFilled) / 1e9 : plan ? fromBase(plan.size_filled, 9) : null;
   const horizon = decoded?.horizonEnd ?? toUnix(plan?.horizon_end ?? null);
@@ -318,7 +322,7 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
 
       {notFound && (
         <EmptyState title="Plan not found on devnet yet">
-          {createSig ? "It may take a few seconds to appear. This page keeps checking." : "Check the address, or start a new plan."}
+          {createSig ? "Can take a few seconds. Still checking." : "Check the address, or start a new plan."}
         </EmptyState>
       )}
       {!notFound && (
@@ -379,7 +383,7 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
           )}
         </div>
         {!dataConfigured ? (
-          <p className="text-sm text-muted-foreground">Round status appears here once the data feed is connected.</p>
+          <p className="text-sm text-muted-foreground">Round status appears once the data feed connects.</p>
         ) : rounds.status === "loading" ? (
           <Skeleton className="h-16 w-full" />
         ) : rounds.status === "error" ? (
@@ -392,8 +396,8 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
         ) : !latest ? (
           <p className="text-sm text-muted-foreground">
             {quick
-              ? "Your funds are in Jupiter Lend. The next quick round opens at the start of the next 10-minute window."
-              : "Your funds are in Jupiter Lend, earning interest. The desk opens rounds in the daily auction window (08:00–08:30 UTC)."}
+              ? "Earning Jupiter Lend interest. Next round opens within 10 minutes."
+              : "Earning Jupiter Lend interest. Rounds open daily, 08:00–08:30 UTC."}
           </p>
         ) : (
           <>
@@ -418,7 +422,7 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
             </dl>
             {latestBids.status === "ready" && latestBids.rows.length > 0 && (
               <div className="grid gap-2">
-                <p className="text-xs font-medium text-muted-foreground">What each maker bid</p>
+                <p className="text-xs font-medium text-muted-foreground">Maker bids</p>
                 <MakerBidList bids={latestBids.rows} roundMaker={latest.maker} />
               </div>
             )}
@@ -427,9 +431,9 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
               <p className="rounded-xl border border-primary/25 bg-accent p-4 text-sm text-accent-foreground">
                 {latest.exercised === 2 || latest.exercised === true
                   ? buy
-                    ? `Filled: you bought ${fmtSize(fromBase(latest.size, 9) ?? 0)} SOL at ${usdcPrice(latest.strike)}, and kept what you were paid.`
-                    : `Filled: you sold at ${usdcPrice(latest.strike)}, and kept what you were paid.`
-                  : `Not filled: you kept your ${buy ? "USDC" : "SOL"} and what you were paid. The next round starts automatically.`}
+                    ? `Filled: bought ${fmtSize(fromBase(latest.size, 9) ?? 0)} SOL at ${usdcPrice(latest.strike)}. You kept the pay.`
+                    : `Filled: sold at ${usdcPrice(latest.strike)}. You kept the pay.`
+                  : `Not filled: you kept your ${buy ? "USDC" : "SOL"} and the pay. Next round starts automatically.`}
               </p>
             )}
             {latest.sigs && Object.keys(latest.sigs).length > 0 && (
