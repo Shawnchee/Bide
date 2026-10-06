@@ -166,6 +166,12 @@ Apply the three migrations in `supabase/migrations/` before starting the worker;
 - **History starts 6 Oct ~06:11 UTC.** Earlier rounds ran on a laptop with an in-memory store; they are on-chain (above) but not on `/desk` or `/auctions`.
 - **Regulation.** Selling options to retail users needs legal advice (MAS and others) and likely geo-blocking before any launch.
 
+## Security reviews and mainnet gates
+
+Two external-style adversarial reviews ran on 6 Oct 2026, after an earlier Fable 5.1 review.
+- **Fixed and deployed (devnet slot 508146124):** every program-owned vault and settlement destination is bound to its canonical address (pool deposit/withdraw/lend/take, plan close/expire/update/flip, resolve/unwind/withdraw); `post_sample` rejects updates from the future; collateral shortfalls are logged. 6 new attack tests (34/34 program tests). Worker/app: makers re-price instead of giving up, stale Pyth spot is refused, maker P&L sign fixed, auth on desk-run reads, `/maker` keeps last good data.
+- **Before mainnet (not fixed on devnet, by design):** atomic deploy + `init_config` (front-run risk); upgrade and pool authority to a multisig; timelock/allowlist on admin oracle and fee changes; refund the premium when an epoch fails and the round unwinds; sanity bounds on Jupiter Lend layout reads and validation of every Lend market account; a formal audit.
+
 ## Pre-existing work
 
 None. Only planning documents (no code) existed before the hackathon kickoff on 4 Oct 2026. All code was written during TOKEN2049 Origins; see `git log`.
