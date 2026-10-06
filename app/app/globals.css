@@ -1,0 +1,255 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+  --font-heading: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --color-positive: var(--positive);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Bide brand — "Night Ledger" (dark-first terminal neutrals + one evergreen-mint accent).
+   Source of truth: /brand.md. Style language referenced from app/design-reference.md. */
+:root {
+  /* light */
+  --background: #f5f7f9;
+  --foreground: #0f1720;
+  --card: #ffffff;
+  --card-foreground: #0f1720;
+  --popover: #ffffff;
+  --popover-foreground: #0f1720;
+  --primary: #0b7d5c;
+  --primary-foreground: #ffffff;
+  --secondary: #edf1f5;
+  --secondary-foreground: #0f1720;
+  --muted: #edf1f5;
+  --muted-foreground: #4f5d70;
+  --accent: #e3f4ee;
+  --accent-foreground: #075c44;
+  --destructive: #d42a5b;
+  --positive: #0b7d5c;
+  --warning: #d99a1e;
+  --warning-foreground: #6b4a07;
+  --warning-soft: #fdf3dc;
+  --border: #e1e7ee;
+  --input: #d5dde6;
+  --ring: #0b7d5c;
+  --chart-1: #0b7d5c;
+  --chart-2: #d99a1e;
+  --chart-3: #6a7b91;
+  --chart-4: #5cc9a4;
+  --chart-5: #b8c4d2;
+  --radius: 0.5rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0f1720;
+  --sidebar-primary: #0b7d5c;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e3f4ee;
+  --sidebar-accent-foreground: #075c44;
+  --sidebar-border: #e1e7ee;
+  --sidebar-ring: #0b7d5c;
+}
+
+.dark {
+  --background: #090d10;
+  --foreground: #e6ebf1;
+  --card: #10161d;
+  --card-foreground: #e6ebf1;
+  --popover: #121a22;
+  --popover-foreground: #e6ebf1;
+  --primary: #62e3b6;
+  --primary-foreground: #06120d;
+  --secondary: #19222c;
+  --secondary-foreground: #e6ebf1;
+  --muted: #151d26;
+  --muted-foreground: #90a1b9;
+  --accent: #10261f;
+  --accent-foreground: #8cedc9;
+  --destructive: #f2557f;
+  --positive: #62e3b6;
+  --warning: #f0b43c;
+  --warning-foreground: #f5d48c;
+  --warning-soft: #241c0c;
+  --border: #1f2833;
+  --input: #263140;
+  --ring: #62e3b6;
+  --chart-1: #62e3b6;
+  --chart-2: #f0b43c;
+  --chart-3: #90a1b9;
+  --chart-4: #2f8f6f;
+  --chart-5: #3a4757;
+  --sidebar: #0c1217;
+  --sidebar-foreground: #e6ebf1;
+  --sidebar-primary: #62e3b6;
+  --sidebar-primary-foreground: #06120d;
+  --sidebar-accent: #10261f;
+  --sidebar-accent-foreground: #8cedc9;
+  --sidebar-border: #1f2833;
+  --sidebar-ring: #62e3b6;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+    font-feature-settings: "cv11" 1, "ss01" 1;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 30%, transparent);
+  }
+}
+@layer base {
+  /* Display = Inter semibold with tight tracking (no serif). */
+  .font-display {
+    font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.022em;
+  }
+  /* Numbers: Inter tabular figures. Addresses/hashes use font-mono. */
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "cv11" 1;
+  }
+  /* Section label: 12px muted caption, the terminal-style eyebrow. */
+  .label-caps {
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 500;
+    color: var(--muted-foreground);
+  }
+}
+
+/* Swap-card input panels (filled panel, big borderless amount, right-hand unit pill). */
+@layer components {
+  .swap-panel {
+    border-radius: calc(var(--radius) * 2);
+    background: var(--secondary);
+    border: 1px solid transparent;
+    padding: 0.875rem 1rem;
+    transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .swap-panel:focus-within { border-color: var(--input); }
+  .swap-panel-outline { background: transparent; border-color: var(--border); }
+  .swap-input {
+    min-width: 0;
+    width: 100%;
+    flex: 1 1 0%;
+    background: transparent;
+    font-size: 1.75rem;
+    line-height: 2.25rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--foreground);
+    outline: none;
+  }
+  .swap-input::placeholder { color: color-mix(in oklab, var(--muted-foreground) 60%, transparent); }
+  .swap-input[aria-invalid="true"] { color: var(--destructive); }
+  .swap-pill {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.375rem;
+    height: 2.25rem;
+    padding: 0 0.875rem;
+    border-radius: 9999px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  /* Compact data table: 12px muted header, hairline rows, right-aligned tabular numbers via .num. */
+  .data-table { width: 100%; font-size: 0.8125rem; text-align: left; }
+  .data-table thead th {
+    font-size: 0.75rem; font-weight: 500; color: var(--muted-foreground);
+    padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  .data-table tbody td, .data-table tbody th { padding: 0.625rem 0.75rem; border-bottom: 1px solid var(--border); }
+  .data-table tbody tr:last-child > * { border-bottom: 0; }
+  .data-table tbody tr { transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1); }
+  .data-table tbody tr:hover { background: color-mix(in oklab, var(--secondary) 55%, transparent); }
+}
+
+/* Wallet adapter modal, re-skinned to brand tokens. */
+.wallet-adapter-modal-wrapper {
+  background: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.4) !important;
+  box-shadow: 0 24px 48px -12px rgb(0 0 0 / 0.35) !important;
+  font-family: var(--font-inter), ui-sans-serif, system-ui !important;
+}
+.wallet-adapter-modal-title { color: var(--popover-foreground) !important; font-weight: 600 !important; font-size: 1.125rem !important; }
+.wallet-adapter-modal-button-close { background: var(--muted) !important; }
+.wallet-adapter-modal-button-close svg { fill: var(--muted-foreground) !important; }
+.wallet-adapter-modal-list .wallet-adapter-button {
+  color: var(--popover-foreground) !important;
+  font-family: var(--font-inter), ui-sans-serif, system-ui !important;
+  font-weight: 500 !important;
+  border-radius: var(--radius) !important;
+}
+.wallet-adapter-modal-list .wallet-adapter-button:not([disabled]):hover { background: var(--muted) !important; }
+.wallet-adapter-modal-list-more { color: var(--muted-foreground) !important; }
+.wallet-adapter-modal-overlay { background: rgb(4 7 10 / 0.6) !important; backdrop-filter: blur(4px); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
