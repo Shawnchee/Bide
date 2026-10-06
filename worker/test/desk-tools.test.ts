@@ -9,6 +9,9 @@ import { parseBybit } from "../src/pricer/venues/bybit.js";
 import { parseBinance } from "../src/pricer/venues/binance.js";
 import { parsePythParsed } from "../src/pyth/hermes.js";
 import { fixture, FIXTURE_NOW } from "./helpers.js";
+import { pricingNowSecs } from "../src/keeper/schedule.js";
+import { priceOption } from "../src/pricer/consensus.js";
+import { YEAR_SECS } from "../src/pricer/bs.js";
 
 const NOW = FIXTURE_NOW;
 function tools() {
@@ -55,4 +58,43 @@ test("fill_probability and venue_dispersion on real snapshots", async () => {
   assert.ok(f.probability > 0.01 && f.probability < 0.5);
   const d = await t.venue_dispersion({ asset: "SOL", expiry: FRI });
   assert.ok(d.venues_used >= 2 && d.iv_spread_vol_pts !== null);
+});
+
+// notes/stress-test.md "Fill rate": the desk runs ~180 s before a quick window, i.e. ~780 s to expiry, but the round
+// opens at the window start (expiry − 600). Quick cells must be valued from there, so floor ≤ maker fair at take time.
+test("pricingNowSecs: quick → max(now, expiry − 600); std → now", () => {
+  assert.equal(pricingNowSecs(true, 10_200, 9_420), 9_600);
+  assert.equal(pricingNowSecs(true, 10_200, 9_610), 9_610, "inside the window → now");
+  assert.equal(pricingNowSecs(false, 100_000, 9_420), 9_420);
+});
+test("price_grid values a quick epoch from its window open (tte ≈ 600 s, not ≈ 780 s)", async () => {
+  const { pricer, t } = tools();
+  const nowS = Math.floor(NOW / 1000);
+  const E = nowS + 780; // desk run 180 s before the window
+  const spot = pricer.get("SOL")!.spot!.price;
+  const K = Math.round(spot * 0.996); // near the money (the recording plan's spot −0.4 %)
+  const g = await t.price_grid({ asset: "SOL", kind: "put", strikes: [String(K * 1_000_000)], expiries: [E], size: "100000000" });
+  const cell = g.cells[0]!;
+  assert.equal(cell.error, undefined, String(cell.error));
+  const at600 = await pricer.quote("SOL", "put", K, E * 1000, 0.1, true, (E - 600) * 1000);
+  const at780 = await pricer.quote("SOL", "put", K, E * 1000, 0.1, true);
+  assert.ok(at600.ok && at780.ok);
+  assert.ok(Math.abs(at600.tYears * YEAR_SECS - 600) < 1, `priced tte ${at600.tYears * YEAR_SECS}`);
+  assert.ok(Math.abs(at780.tYears * YEAR_SECS - 780) < 1);
+  assert.equal(cell.fair_premium, String(Math.round(at600.fairPremium)), "grid uses the window-open reference");
+  assert.ok(at600.fairPremium < at780.fairPremium);
+  // Maker fair at take time: round opened ~5 s into the window, maker prices with the wall clock (makers/index.ts view()).
+  const st = pricer.get("SOL")!;
+  const maker = priceOption({ asset: "SOL", type: "put", strike: K, expiry: E * 1000, size: 0.1, quick: true, spot, now: NOW, valuationNow: (E - 595) * 1000 }, st.snapshots);
+  assert.ok(maker.ok);
+  assert.ok(BigInt(cell.premium_floor) <= BigInt(Math.round(maker.fairPremium)), `floor ${cell.premium_floor} > maker fair ${maker.fairPremium}`);
+  // Maker stance tools see the same reference as the desk.
+  const fp = await t.fill_probability({ asset: "SOL", kind: "put", strike: String(K * 1_000_000), expiry: E });
+  assert.equal(fp.probability, at600.fillProbability);
+});
+test("price_grid std epochs still price from now", async () => {
+  const { pricer, t } = tools();
+  const g = await t.price_grid({ asset: "SOL", kind: "put", strikes: ["113000000"], expiries: [FRI], size: "200000000" });
+  const direct = await pricer.quote("SOL", "put", 113, FRI * 1000, 0.2, false);
+  assert.ok(direct.ok && g.cells[0]!.fair_premium === String(Math.round(direct.fairPremium)));
 });

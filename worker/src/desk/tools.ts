@@ -11,6 +11,8 @@ import type { DeskTools, PlanView, PriceGrid, RoundKind, SpotView, ToolTrace } f
 import { loadEventCalendar } from "./events.js";
 import { notional, pctChange, pow10, ratio, usd, usdPrice, userMinPremiumFloor, formatUnits } from "./units.js";
 import { errorMessage } from "./errors.js";
+import { QUICK_DESK_LEAD_SECS } from "../keeper/plan.js";
+import { pricingNowSecs } from "../keeper/schedule.js";
 
 /** Circle devnet USDC (BUILD §2). Collateral mint for put rounds. */
 export const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -253,10 +255,10 @@ export class Toolbox {
     const userPrice = userPriceOf(plan);
     const epochs = plan.open_epochs
       // Only epochs open_round can target from this run: quick → the one whose auction window [E−600, E−540] is open or
-      // opens within the 90 s desk lead (a later epoch's window is ≥ 10 min away — 05:51 run proposed 06:20) and not closed (the desk
+      // opens within the desk lead (QUICK_DESK_LEAD_SECS) (a later epoch's window is ≥ 10 min away — 05:51 run proposed 06:20) and not closed (the desk
       // starts up to 90 s early, when the previous epoch is still "nearest" but no longer openable — integration
       // 2026-10-06 05:39 WindowMissed); std → ≥ 12 h to expiry.
-      .filter((e) => e.kind === (plan.quick ? "quick" : "std") && (plan.quick ? e.expiry - 540 > now && e.expiry - 600 - 90 <= now : e.expiry - now >= 43_200))
+      .filter((e) => e.kind === (plan.quick ? "quick" : "std") && (plan.quick ? e.expiry - 540 > now && e.expiry - 600 - QUICK_DESK_LEAD_SECS <= now : e.expiry - now >= 43_200))
       .sort((x, y) => x.expiry - y.expiry)
       .map((e) => ({ expiry: e.expiry, expiry_utc: new Date(e.expiry * 1000).toISOString(), days_from_now: Math.round(((e.expiry - now) / 86_400) * 100) / 100 }));
     const derived: Record<string, unknown> = {
@@ -285,7 +287,9 @@ export class Toolbox {
     const band = dist === null ? null : distanceBand(dist, plan.quick);
     const cells = grid.cells.map((c) => {
       if (c.error) return c;
-      const secs = c.expiry - now;
+      // Same reference as price_grid: a quick round lives from its window open (expiry − 600), so the on-chain
+      // user-min check sees ≤ 600 s; using that (not the desk's ~780 s lead) keeps floor_over_user_min honest and still safe.
+      const secs = c.expiry - pricingNowSecs(plan.quick, c.expiry, now);
       const n = notional(c.strike, grid.size, plan.asset_decimals, "down");
       const userMin = userMinPremiumFloor({ notional: n, minBpsPerDay: plan.min_premium_bps_per_day, secsToExpiry: secs, feeBps: plan.fee_bps });
       return {

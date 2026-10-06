@@ -37,11 +37,14 @@ export class Pricer {
 
   get(asset: PricerAsset) { return this.state.get(asset); }
 
-  /** Price from the cache (refreshes first if the cache is empty or > 25 s old — quotes go stale at 30 s). */
-  async quote(asset: PricerAsset, type: OptType, strike: number, expiryMs: number, size: number, quick: boolean): Promise<PriceResult | PriceFailure> {
+  /**
+   * Price from the cache (refreshes first if the cache is empty or > 25 s old — quotes go stale at 30 s).
+   * `valuationNowMs` values the option as of that time (default now); quote staleness still uses the wall clock.
+   */
+  async quote(asset: PricerAsset, type: OptType, strike: number, expiryMs: number, size: number, quick: boolean, valuationNowMs?: number): Promise<PriceResult | PriceFailure> {
     let st = this.state.get(asset);
     if (!st || this.now() - st.refreshedAt > 25_000) st = await this.refresh(asset);
     if (!st.spot) return { ok: false, reason: "no Pyth spot", venues: [], rejected: [] };
-    return priceOption({ asset, type, strike, expiry: expiryMs, size, quick, spot: st.spot.price, now: this.now() }, st.snapshots);
+    return priceOption({ asset, type, strike, expiry: expiryMs, size, quick, spot: st.spot.price, now: this.now(), valuationNow: valuationNowMs }, st.snapshots);
   }
 }

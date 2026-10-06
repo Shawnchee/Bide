@@ -6,7 +6,7 @@ import type { BideChain } from "./chain/client.js";
 import type { ChainSnapshot, PlanState } from "./chain/types.js";
 import type { DeskTools, PlanView, PriceCell, EpochKind as DeskEpochKind } from "./desk/types.js";
 import type { JupiterReference } from "./jupiter/reference.js";
-import { quickEpochTargets, stdEpochTargets } from "./keeper/schedule.js";
+import { pricingNowSecs, quickEpochTargets, stdEpochTargets } from "./keeper/schedule.js";
 import { roundEndsBeforeWindow } from "./keeper/plan.js";
 
 /** Expiries ≤ 1 h away are quick epochs (quick plans cap max_expiry at 1 h; std rounds need ≥ 12 h). */
@@ -147,10 +147,12 @@ export class WorkerDeskTools implements DeskTools {
     const sizeWhole = Number(BigInt(args.size)) / 10 ** DECIMALS[sym];
     // Quick epochs are ≤ 1 h out (quick plans' max_expiry); std rounds need ≥ 12 h. Was "≤ 600 s", which mis-priced
     // the next quick epoch as std (no venue → desk skip) whenever the desk ran in its 90 s lead (integration 2026-10-06 05:49).
-    const quick = (e: number) => isQuickHorizon(e, Math.floor((this.d.now ?? Date.now)() / 1000));
+    const nowS = Math.floor((this.d.now ?? Date.now)() / 1000);
     const cells: PriceCell[] = [];
     for (const expiry of args.expiries) for (const s of args.strikes) {
-      const r = await this.d.pricer.quote(sym, args.kind, Number(BigInt(s)) / 1e6, expiry * 1000, sizeWhole, quick(expiry));
+      // Quick rounds are valued from their auction-window open (expiry − 600), not from the desk's lead time.
+      const q = isQuickHorizon(expiry, nowS);
+      const r = await this.d.pricer.quote(sym, args.kind, Number(BigInt(s)) / 1e6, expiry * 1000, sizeWhole, q, pricingNowSecs(q, expiry, nowS) * 1000);
       if (!r.ok) { cells.push({ strike: s, expiry, fair_premium: "0", bid_premium: "0", premium_start: "0", premium_floor: "0", error: r.reason, rejected: r.rejected }); continue; }
       cells.push({
         strike: s, expiry, fair_premium: String(BigInt(Math.round(r.fairPremium))), bid_premium: String(BigInt(Math.round(r.bidPremium))),
@@ -165,8 +167,9 @@ export class WorkerDeskTools implements DeskTools {
 
   async fill_probability(args: { asset: string; kind: "put" | "call"; strike: string; expiry: number }) {
     const sym = this.assetSymbol(await this.d.getSnapshot(), args.asset);
-    const quick = isQuickHorizon(args.expiry, Math.floor((this.d.now ?? Date.now)() / 1000));
-    const r = await this.d.pricer.quote(sym, args.kind, Number(BigInt(args.strike)) / 1e6, args.expiry * 1000, 1, quick);
+    const nowS = Math.floor((this.d.now ?? Date.now)() / 1000);
+    const quick = isQuickHorizon(args.expiry, nowS);
+    const r = await this.d.pricer.quote(sym, args.kind, Number(BigInt(args.strike)) / 1e6, args.expiry * 1000, 1, quick, pricingNowSecs(quick, args.expiry, nowS) * 1000);
     if (!r.ok) throw new Error(`cannot price: ${r.reason}`);
     return { asset: sym, strike: args.strike, expiry: args.expiry, kind: args.kind, probability: r.fillProbability, iv: r.fairIv, quick_pricing: r.quick_pricing };
   }
@@ -184,8 +187,9 @@ export class WorkerDeskTools implements DeskTools {
     let st = this.d.pricer.get(sym);
     if (!st?.spot) st = await this.d.pricer.refresh(sym);
     const atm = Math.round(st.spot?.price ?? 0);
-    const quick = isQuickHorizon(expiry, Math.floor((this.d.now ?? Date.now)() / 1000));
-    const r = await this.d.pricer.quote(sym, "put", atm, expiry * 1000, 1, quick);
+    const nowS = Math.floor((this.d.now ?? Date.now)() / 1000);
+    const quick = isQuickHorizon(expiry, nowS);
+    const r = await this.d.pricer.quote(sym, "put", atm, expiry * 1000, 1, quick, pricingNowSecs(quick, expiry, nowS) * 1000);
     const ivs = (r.venues ?? []).map((v) => v.midIv);
     const now = (this.d.now ?? Date.now)();
     const ages = (st.snapshots ?? []).filter((s) => r.venues.some((v) => v.venue === s.venue)).flatMap((s) => s.quotes.map((q) => (now - q.ts) / 1000));

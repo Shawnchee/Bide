@@ -9,6 +9,18 @@ export const QUICK_AUCTION_OPEN_OFFSET = 600; // window = [expiry − 600, expir
 export const QUICK_AUCTION_CLOSE_OFFSET = 540;
 export const MAX_EPOCH_AHEAD_SECS = 180 * DAY;
 
+/**
+ * Valuation time (unix secs) for pricing a round on `expiry`. A quick round can only open at or after the auction
+ * window start (expiry − 600 s), so the desk — which runs ~180 s before the window — must price it as of
+ * max(now, expiry − 600), not now: pricing from now adds ~3 min of time value the round never has, which put the
+ * floor above the makers' fair at take time (notes/stress-test.md "Fill rate"). Std rounds open at the desk run → now.
+ * The on-chain user-min check uses secs from the actual open (≤ 600 s for quick), so a user-min computed from this
+ * reference is never smaller than the program needs.
+ */
+export function pricingNowSecs(quick: boolean, expiry: number, now: number): number {
+  return quick ? Math.max(now, expiry - QUICK_AUCTION_OPEN_OFFSET) : now;
+}
+
 export type EpochKind = "Std" | "Quick";
 export interface KindParams { nBuckets: number; bucketSecs: number; bucketToleranceSecs: number; graceSecs: number; poolDelaySecs: number }
 /** Plan A (bucketed median; notes/oracle.md: Plan A passed). Values come from packages/shared EPOCH_PARAMS (program mirror). */

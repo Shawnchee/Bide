@@ -16,7 +16,9 @@ export interface PriceRequest {
   size: number; // whole asset units (e.g. 0.2 SOL)
   quick: boolean;
   spot: number; // Pyth spot, USD
-  now: number; // ms
+  now: number; // ms — wall clock (quote staleness)
+  /** ms — time the option is valued from (time to expiry); defaults to `now`. Quick rounds: their auction-window open. */
+  valuationNow?: number;
 }
 
 export interface PriceResult {
@@ -70,10 +72,11 @@ export function auctionAnchors(fairPremium: number, bidPremium: number): Anchors
 export function priceOption(req: PriceRequest, snapshots: VenueSnapshot[]): PriceResult | PriceFailure {
   const venues: VenueIv[] = [];
   const rejected: VenueReject[] = [];
+  const vNow = req.valuationNow ?? req.now;
   for (const snap of snapshots) {
     if (snap.error) { rejected.push({ venue: snap.venue, reason: `fetch failed: ${snap.error}` }); continue; }
     const { kept, dropped } = filterQuotes(snap.quotes, req.now);
-    const r = venueIv(snap.venue, kept, req.strike, req.expiry, req.now, req.quick);
+    const r = venueIv(snap.venue, kept, req.strike, req.expiry, vNow, req.quick);
     if ("reason" in r) rejected.push({ venue: r.venue, reason: `${r.reason} (kept ${kept.length}/${snap.quotes.length}; dropped ${fmtDropped(dropped)})` });
     else venues.push(r);
   }
@@ -82,7 +85,7 @@ export function priceOption(req: PriceRequest, snapshots: VenueSnapshot[]): Pric
 
   const fairIv = median(venues.map((v) => v.midIv));
   const bidIv = median(venues.map((v) => v.bidIv));
-  const T = (req.expiry - req.now) / 1000 / YEAR_SECS;
+  const T = (req.expiry - vNow) / 1000 / YEAR_SECS;
   const scale = req.size * 10 ** USDC_DECIMALS;
   const fairPx = blackPrice(req.type, req.spot, req.strike, T, fairIv) * scale;
   const bidPx = blackPrice(req.type, req.spot, req.strike, T, bidIv) * scale;

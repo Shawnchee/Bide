@@ -1,6 +1,6 @@
 /**
  * Maker agents service: decides one stance per (maker, asset, epoch, round kind) shortly before that epoch's auction
- * window (MAKER_STANCE_LEAD_SECS, default 240 s — earlier than the quick desk's 90 s lead so stance calls don't sit in
+ * window (MAKER_STANCE_LEAD_SECS, default 420 s — well before the quick desk's 180 s lead so stance calls don't sit in
  * the serial GLM queue in front of the desk). Rounds then derive bids instantly from the stored stance (makers/index.ts).
  */
 import { randomUUID } from "node:crypto";
