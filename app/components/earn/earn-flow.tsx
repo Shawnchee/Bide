@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, ChevronDown, Repeat, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,8 @@ import { ASSETS, type AssetSymbol } from "@/lib/constants";
 import { QUICK_PLANS_ENABLED } from "@/lib/env";
 import {
   buildDraft,
+  DAY,
+  MAX_HORIZON_SECS,
   fmtPrice,
   fmtSize,
   horizonEnd,
@@ -51,8 +53,18 @@ const STD_HORIZONS: { id: HorizonChoice; label: string }[] = [
   { id: "1w", label: "1 week" },
   { id: "1m", label: "1 month" },
   { id: "3m", label: "3 months" },
-  { id: "date", label: "Pick a date" },
 ];
+
+/** A custom deadline resolves to 08:00 UTC of that day (plan-math horizonEnd); the input's min/max match validateHorizon. */
+const ymd = (secs: number) => new Date(secs * 1000).toISOString().slice(0, 10);
+const at0800 = (d: string) => Date.parse(`${d}T08:00:00Z`) / 1000;
+function dateBounds(now: number): { min: string; max: string } {
+  let min = ymd(now + DAY);
+  if (at0800(min) < now + DAY) min = ymd(at0800(min) + DAY);
+  let max = ymd(now + MAX_HORIZON_SECS);
+  if (at0800(max) > now + MAX_HORIZON_SECS) max = ymd(at0800(max) - DAY);
+  return { min, max };
+}
 const QUICK_HORIZONS: { id: HorizonChoice; label: string }[] = [
   { id: "q30m", label: "30 min" },
   { id: "q1h", label: "1 hour" },
@@ -125,26 +137,35 @@ export function EarnFlow() {
   const [customDate, setCustomDate] = useState("");
   const [minPay, setMinPay] = useState<MinPayId>("standard");
   const [step, setStep] = useState<"form" | "review">("form");
-  /** "By when" + "Minimum pay" sit behind an Advanced disclosure (defaults: 1 month, recommended min pay). */
+  /** "Minimum pay" sits behind an Advanced disclosure (default: recommended min pay). */
   const [advOpen, setAdvOpen] = useState(false);
   const [touched, setTouched] = useState(false);
   /** Intake result waiting to be applied after the preset effects below have run (they reset target/horizon). */
   const [intake, setIntake] = useState<IntakeFields | null>(null);
   /** The assistant couldn't settle a price: keep the field empty and flagged instead of falling back to a preset. */
   const [priceNeeded, setPriceNeeded] = useState(false);
+  /**
+   * The current target came from the user (typed / slider) or the intake assistant. While set, a late spot arrival or a
+   * side/mode change never replaces it with a preset (A-H2). Cleared only by an explicit patience click.
+   */
+  const userEdited = useRef(false);
 
   const spotState = useSpot(asset);
   const spot = spotState.status === "ready" ? spotState.spot.price : null;
   const buySide = goal !== "sell";
 
-  // Initialise / re-snap the target when spot arrives or the side/quick mode changes.
+  // Seed (or re-snap a still-preset) target when spot arrives or the side/quick mode changes.
+  // Never overwrites a price the user typed or the assistant applied (A-H2; decision log 2026-10-06).
   useEffect(() => {
     if (!spot || priceNeeded) return;
+    if (goal === "both" && !exitText) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setExitText(priceText(snapDollars(spot * 1.1, tick, true)));
+    }
+    if (userEdited.current) return;
     const p = presetPrice(spot, patience, buySide, quick, tick);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTarget(p);
     setTargetText(priceText(p));
-    if (goal === "both" && !exitText) setExitText(priceText(snapDollars(spot * 1.1, tick, true)));
     // Only when these change, not on every patience click (handled in pickPatience).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spot !== null, goal, quick, assetSym, tick]);
@@ -169,6 +190,7 @@ export function EarnFlow() {
     if (f.patience) setPatience(f.patience);
     if (f.target_price_usd) {
       const snapped = snapDollars(f.target_price_usd, tick, !buy);
+      userEdited.current = true;
       setPriceNeeded(false);
       setTarget(snapped);
       setTargetText(priceText(snapped));
@@ -187,8 +209,8 @@ export function EarnFlow() {
     if (f.horizon && (qk ? f.horizon.startsWith("q") : !f.horizon.startsWith("q"))) setHorizon(f.horizon);
     if (f.horizon === "date" && f.deadline_date) setCustomDate(f.deadline_date);
     if (f.min_pay) setMinPay(f.min_pay);
-    // Show the assistant's non-default choices instead of hiding them behind "Advanced".
-    if ((f.horizon && f.horizon !== "1m" && f.horizon !== "q1h") || (f.min_pay && f.min_pay !== "standard")) setAdvOpen(true);
+    // Show the assistant's non-default min pay instead of hiding it behind "Advanced".
+    if (f.min_pay && f.min_pay !== "standard") setAdvOpen(true);
     setIntake(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intake]);
@@ -203,6 +225,7 @@ export function EarnFlow() {
   const pickPatience = (p: Patience) => {
     setPatience(p);
     if (spot) {
+      userEdited.current = false;
       setPriceNeeded(false);
       const v = presetPrice(spot, p, buySide, quick, tick);
       setTarget(v);
@@ -214,6 +237,7 @@ export function EarnFlow() {
     setTargetText(s);
     const v = Number(s);
     if (Number.isFinite(v) && v > 0) {
+      userEdited.current = true;
       setPriceNeeded(false);
       setTarget(v);
       if (spot) {
@@ -246,6 +270,7 @@ export function EarnFlow() {
   const exitDollars = goal === "both" ? Number(exitText) || null : null;
   const end = now ? horizonEnd(horizon, now, customDate) : null;
   const horizonError = now ? validateHorizon(end, now, quick) : null;
+  const dates = now ? dateBounds(now) : null;
   const minPayBps = MIN_PAY_PRESETS.find((m) => m.id === minPay)!.bps;
 
   const draft = useMemo(() => {
@@ -306,7 +331,6 @@ export function EarnFlow() {
         onSubmit={(e) => {
           e.preventDefault();
           setTouched(true);
-          if (horizonError) setAdvOpen(true);
           if (!formError) setStep("review");
         }}
         noValidate
@@ -471,6 +495,39 @@ export function EarnFlow() {
           )}
         </Question>
 
+        <Question n={4} title="By when?" hint={quick ? "Unfilled by then? Everything comes back to you." : "Up to 6 months. Unfilled by then? Everything comes back to you."} id="q-when">
+          <div role="radiogroup" aria-labelledby="q-when" className="flex flex-wrap items-center gap-2">
+            {(quick ? QUICK_HORIZONS : STD_HORIZONS).map((h) => (
+              <Choice key={h.id} selected={horizon === h.id} onClick={() => setHorizon(h.id)} className="min-h-10 justify-center rounded-full px-4 py-2">
+                <span className="text-sm font-medium">{h.label}</span>
+              </Choice>
+            ))}
+            {!quick && dates && (
+              <Input
+                id="date"
+                type="date"
+                aria-label="Or pick a date (tomorrow to 6 months)"
+                className={cn(
+                  "h-10 w-auto rounded-full px-4 text-sm",
+                  horizon === "date" ? "border-primary/70 bg-accent text-accent-foreground" : "bg-secondary/40",
+                )}
+                value={customDate}
+                min={dates.min}
+                max={dates.max}
+                onChange={(e) => {
+                  setCustomDate(e.target.value);
+                  setHorizon("date");
+                }}
+              />
+            )}
+          </div>
+          {horizonError && (touched || horizon === "date") && (
+            <p className="text-sm text-destructive" role="alert">
+              {horizon === "date" && dates && customDate ? `${horizonError} Choose ${dates.min} to ${dates.max}.` : horizonError}
+            </p>
+          )}
+        </Question>
+
         <details
           className="group border-t border-border"
           open={advOpen}
@@ -479,37 +536,10 @@ export function EarnFlow() {
           <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:px-6 [&::-webkit-details-marker]:hidden">
             <span>
               Advanced
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {(quick ? QUICK_HORIZONS : STD_HORIZONS).find((h) => h.id === horizon)?.label ?? "Custom date"} ·{" "}
-                {MIN_PAY_PRESETS.find((m) => m.id === minPay)!.label} min pay
-              </span>
+              <span className="ml-2 text-xs font-normal text-muted-foreground">{MIN_PAY_PRESETS.find((m) => m.id === minPay)!.label} min pay</span>
             </span>
             <ChevronDown className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" aria-hidden />
           </summary>
-          <Question n={4} title="By when?" hint="Unfilled by then? Everything comes back to you." id="q-when">
-            <div role="radiogroup" aria-labelledby="q-when" className="flex flex-wrap gap-2">
-              {(quick ? QUICK_HORIZONS : STD_HORIZONS).map((h) => (
-                <Choice key={h.id} selected={horizon === h.id} onClick={() => setHorizon(h.id)} className="min-h-10 justify-center rounded-full px-4 py-2">
-                  <span className="text-sm font-medium">{h.label}</span>
-                </Choice>
-              ))}
-            </div>
-            {horizon === "date" && (
-              <div className="grid max-w-xs gap-1.5">
-                <Label htmlFor="date">Deadline (max 6 months)</Label>
-                <Input
-                  id="date"
-                  type="date"
-                  className="h-10"
-                  value={customDate}
-                  min={now ? new Date((now + 86400 * 2) * 1000).toISOString().slice(0, 10) : undefined}
-                  max={now ? new Date((now + 86400 * 179) * 1000).toISOString().slice(0, 10) : undefined}
-                  onChange={(e) => setCustomDate(e.target.value)}
-                />
-              </div>
-            )}
-            {horizonError && (touched || horizon === "date") && <p className="text-sm text-destructive">{horizonError}</p>}
-          </Question>
           <Question n={5} title="Minimum pay per round" hint="The program refuses rounds paying less, after fee." id="q-min">
             <div role="radiogroup" aria-labelledby="q-min" className="grid gap-2 sm:grid-cols-3">
               {MIN_PAY_PRESETS.map((m) => (
