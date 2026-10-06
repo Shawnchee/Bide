@@ -88,7 +88,9 @@ pub fn post_sample(ctx: Context<PostSample>, bucket: u8) -> Result<()> {
     require!(m.feed_id == asset.pyth_feed_id, BideError::WrongFeed);
     let bstart = super::round::window_start(e) + (bucket as i64) * (e.bucket_secs as i64);
     // unique sample per bucket: the first update at/after bucket start (P2 rule, notes/oracle.md §2)
-    let in_bucket = m.prev_publish_time < bstart
+    // publish_time can't be in the future (P-L2): a sample must already have happened on-chain time
+    let in_bucket = m.publish_time <= now
+        && m.prev_publish_time < bstart
         && m.publish_time >= bstart
         && m.publish_time <= bstart + e.bucket_tolerance_secs as i64;
     require!(in_bucket, BideError::SampleOutsideBucket);
@@ -153,7 +155,10 @@ fn escrow_mint(r: &Round, asset_mint: &Pubkey) -> Pubkey {
 fn check_maker_dest(r: &Round, pool: &Option<Box<Account<Pool>>>, dest: &AccountInfo, mint: &Pubkey) -> Result<()> {
     if r.maker_is_pool {
         let pool = pool.as_ref().ok_or(BideError::InvalidAccount)?;
-        util::check_token_account(dest, mint, Some(&pool_lend_auth(pool)?))?;
+        let pool_auth = pool_lend_auth(pool)?;
+        // the pool's books only track its canonical vaults: the destination must be ATA(mint, pool_auth)
+        util::require_ata(dest.key, &pool_auth, mint)?;
+        util::check_token_account(dest, mint, Some(&pool_auth))?;
     } else {
         util::check_token_account(dest, mint, Some(&r.maker))?;
     }
@@ -233,7 +238,10 @@ pub fn resolve_round(ctx: Context<ResolveRound>) -> Result<()> {
 
     if exercised {
         let want_owner = if r.kind == RoundKind::Put && plan.side == Side::Wheel {
-            plan_lend_auth(plan)?
+            // Wheel put delivery goes to the plan's canonical asset vault (flip_plan / close read it there)
+            let la = plan_lend_auth(plan)?;
+            util::require_ata(ctx.accounts.user_dest.key, &la, &emint)?;
+            la
         } else {
             plan.owner
         };
@@ -314,6 +322,12 @@ pub fn withdraw_collateral<'info>(ctx: Context<'info, WithdrawCollateral<'info>>
     };
     let vs = &ctx.accounts.vault_staging;
     require_keys_eq!(vs.mint, mint, BideError::InvalidMint);
+    let la_key = ctx.accounts.lend_auth.key();
+    util::require_ata(&vs.key(), &la_key, &mint)?;
+    if let Some(ft) = lend::f_token_for_mint(&mint) {
+        let vf = ctx.accounts.vault_f_token.as_ref().ok_or(BideError::InvalidLendAccounts)?;
+        util::require_ata(&vf.key(), &la_key, &ft)?;
+    }
     check_maker_dest(r, &ctx.accounts.pool, &ctx.accounts.counterparty_dest, &mint)?;
 
     let plan_key = plan.key();
@@ -353,6 +367,11 @@ pub fn withdraw_collateral<'info>(ctx: Context<'info, WithdrawCollateral<'info>>
     let staged = lend::token_amount(&vs.to_account_info())?;
     let paid = owed.min(staged);
     util::transfer(&tp, &vs.to_account_info(), &ctx.accounts.counterparty_dest, &lend_auth, Some(seeds), paid)?;
+    if paid < owed {
+        // shortfall (Lend loss / rounding): counterparty is paid what the plan holds; the deficit is logged here and
+        // recorded in CollateralWithdrawn (owed − paid).
+        msg!("bide: collateral shortfall deficit={} owed={} paid={}", owed - paid, owed, paid);
+    }
 
     // pool receivable booked in resolve_round is now settled
     if r.maker_is_pool {

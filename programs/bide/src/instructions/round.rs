@@ -328,9 +328,15 @@ pub struct PoolTakeRound<'info> {
     /// CHECK: PDA
     #[account(seeds = [SEED_LEND_AUTH, pool.key().as_ref()], bump = pool.lend_auth_bump)]
     pub pool_auth: UncheckedAccount<'info>,
-    #[account(mut, token::mint = USDC_MINT, token::authority = pool_auth)]
+    #[account(
+        mut, token::mint = USDC_MINT, token::authority = pool_auth,
+        constraint = pool_usdc.key() == util::ata(&pool_auth.key(), &USDC_MINT) @ BideError::InvalidAccount
+    )]
     pub pool_usdc: Box<Account<'info, TokenAccount>>,
-    #[account(mut, token::mint = WSOL_MINT, token::authority = pool_auth)]
+    #[account(
+        mut, token::mint = WSOL_MINT, token::authority = pool_auth,
+        constraint = pool_wsol.key() == util::ata(&pool_auth.key(), &WSOL_MINT) @ BideError::InvalidAccount
+    )]
     pub pool_wsol: Box<Account<'info, TokenAccount>>,
     /// CHECK: Lend USDC `lending` account (exchange price for NAV)
     #[account(address = LEND_USDC_LENDING)]

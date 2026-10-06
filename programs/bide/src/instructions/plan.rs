@@ -149,6 +149,7 @@ pub fn create_plan<'info>(ctx: Context<'info, CreatePlan<'info>>, args: CreatePl
             let vf = ctx.accounts.vault_f_token.as_ref().ok_or(BideError::InvalidLendAccounts)?;
             require_keys_eq!(vf.mint, ft, BideError::InvalidMint);
             require_keys_eq!(vf.owner, ctx.accounts.lend_auth.key(), BideError::InvalidAccount);
+            util::require_ata(&vf.key(), &ctx.accounts.lend_auth.key(), &ft)?;
             let m = LendMarket::from_remaining(ctx.remaining_accounts, 0, &collateral_mint)?;
             let progs = LendPrograms {
                 token_program: &ctx.accounts.token_program.to_account_info(),
@@ -285,6 +286,16 @@ fn drain_plan<'info>(ctx: &Context<'info, ClosePlan<'info>>) -> Result<(u64, u64
     let mint = phase_collateral_mint(p);
     let vc = &ctx.accounts.vault_collateral;
     require_keys_eq!(vc.mint, mint, BideError::InvalidMint);
+    // canonical vaults only, checked before anything moves (a substitute empty account would otherwise let the
+    // plan close while its real balances stay stranded) — including the fToken vault when its balance is 0.
+    util::require_ata(&vc.key(), &lend_auth.key(), &mint)?;
+    if let Some(ft) = lend::f_token_for_mint(&mint) {
+        let vf = ctx.accounts.vault_f_token.as_ref().ok_or(BideError::InvalidLendAccounts)?;
+        util::require_ata(&vf.key(), &lend_auth.key(), &ft)?;
+    }
+    if let Some(va) = ctx.accounts.vault_asset.as_ref() {
+        util::require_ata(&va.key(), &lend_auth.key(), &p.asset_mint)?;
+    }
 
     if let Some(ft) = lend::f_token_for_mint(&mint) {
         let vf = ctx.accounts.vault_f_token.as_ref().ok_or(BideError::InvalidLendAccounts)?;
@@ -455,11 +466,13 @@ pub fn update_plan<'info>(ctx: Context<'info, UpdatePlan<'info>>, args: UpdatePl
     let seeds: &[&[u8]] = &[SEED_LEND_AUTH, plan_key.as_ref(), &[p.lend_auth_bump]];
     let lend_auth = ctx.accounts.lend_auth.to_account_info();
     let tp = ctx.accounts.token_program.to_account_info();
+    util::require_ata(&vc.key(), &lend_auth.key(), &mint)?;
     let market = match lend::f_token_for_mint(&mint) {
         Some(ft) => {
             let vf = ctx.accounts.vault_f_token.as_ref().ok_or(BideError::InvalidLendAccounts)?;
             require_keys_eq!(vf.mint, ft, BideError::InvalidMint);
             require_keys_eq!(vf.owner, lend_auth.key(), BideError::InvalidAccount);
+            util::require_ata(&vf.key(), &lend_auth.key(), &ft)?;
             Some((LendMarket::from_remaining(ctx.remaining_accounts, 0, &mint)?, vf.to_account_info()))
         }
         None => None,
@@ -539,6 +552,14 @@ pub fn flip_plan<'info>(ctx: Context<'info, FlipPlan<'info>>) -> Result<()> {
     let vuf = &ctx.accounts.vault_usdc_f_token;
     require_keys_eq!(vu.mint, USDC_MINT, BideError::InvalidMint);
     require_keys_eq!(vuf.mint, LEND_USDC_FTOKEN, BideError::InvalidMint);
+    // canonical plan vaults only (USDC, USDC fToken, asset, asset fToken), checked before anything moves
+    util::require_ata(&vu.key(), &lend_auth.key(), &USDC_MINT)?;
+    util::require_ata(&vuf.key(), &lend_auth.key(), &LEND_USDC_FTOKEN)?;
+    util::require_ata(&ctx.accounts.vault_asset.key(), &lend_auth.key(), &p.asset_mint)?;
+    if let Some(ft) = lend::f_token_for_mint(&p.asset_mint) {
+        let vaf = ctx.accounts.vault_asset_f_token.as_ref().ok_or(BideError::InvalidLendAccounts)?;
+        util::require_ata(&vaf.key(), &lend_auth.key(), &ft)?;
+    }
     let usdc_m = LendMarket::from_remaining(ctx.remaining_accounts, 0, &USDC_MINT)?;
     if vuf.amount > 0 {
         let value = lend::shares_to_assets(vuf.amount, lend::token_exchange_price(usdc_m.lending())?)?;

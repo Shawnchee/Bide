@@ -124,9 +124,15 @@ pub struct PoolDeposit<'info> {
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut, token::mint = mint, token::authority = lp)]
     pub lp_source: Box<Account<'info, TokenAccount>>,
-    #[account(mut, token::mint = USDC_MINT, token::authority = pool_auth)]
+    #[account(
+        mut, token::mint = USDC_MINT, token::authority = pool_auth,
+        constraint = pool_usdc.key() == util::ata(&pool_auth.key(), &USDC_MINT) @ BideError::InvalidAccount
+    )]
     pub pool_usdc: Box<Account<'info, TokenAccount>>,
-    #[account(mut, token::mint = WSOL_MINT, token::authority = pool_auth)]
+    #[account(
+        mut, token::mint = WSOL_MINT, token::authority = pool_auth,
+        constraint = pool_wsol.key() == util::ata(&pool_auth.key(), &WSOL_MINT) @ BideError::InvalidAccount
+    )]
     pub pool_wsol: Box<Account<'info, TokenAccount>>,
     /// SOL asset (spot feed params)
     #[account(seeds = [SEED_ASSET, WSOL_MINT.as_ref()], bump = sol_asset.bump)]
@@ -202,11 +208,20 @@ pub struct PoolWithdraw<'info> {
     pub share_mint: Box<Account<'info, Mint>>,
     #[account(mut, token::mint = share_mint, token::authority = lp)]
     pub lp_shares: Box<Account<'info, TokenAccount>>,
-    #[account(mut, token::mint = USDC_MINT, token::authority = pool_auth)]
+    #[account(
+        mut, token::mint = USDC_MINT, token::authority = pool_auth,
+        constraint = pool_usdc.key() == util::ata(&pool_auth.key(), &USDC_MINT) @ BideError::InvalidAccount
+    )]
     pub pool_usdc: Box<Account<'info, TokenAccount>>,
-    #[account(mut, token::mint = WSOL_MINT, token::authority = pool_auth)]
+    #[account(
+        mut, token::mint = WSOL_MINT, token::authority = pool_auth,
+        constraint = pool_wsol.key() == util::ata(&pool_auth.key(), &WSOL_MINT) @ BideError::InvalidAccount
+    )]
     pub pool_wsol: Box<Account<'info, TokenAccount>>,
-    #[account(mut, token::mint = LEND_USDC_FTOKEN, token::authority = pool_auth)]
+    #[account(
+        mut, token::mint = LEND_USDC_FTOKEN, token::authority = pool_auth,
+        constraint = pool_f_token.key() == util::ata(&pool_auth.key(), &LEND_USDC_FTOKEN) @ BideError::InvalidAccount
+    )]
     pub pool_f_token: Box<Account<'info, TokenAccount>>,
     #[account(mut, token::mint = USDC_MINT, token::authority = lp)]
     pub lp_usdc: Box<Account<'info, TokenAccount>>,
@@ -284,9 +299,15 @@ pub struct PoolLend<'info> {
     /// CHECK: PDA
     #[account(mut, seeds = [SEED_LEND_AUTH, pool.key().as_ref()], bump = pool.lend_auth_bump)]
     pub pool_auth: UncheckedAccount<'info>,
-    #[account(mut, token::mint = USDC_MINT, token::authority = pool_auth)]
+    #[account(
+        mut, token::mint = USDC_MINT, token::authority = pool_auth,
+        constraint = pool_usdc.key() == util::ata(&pool_auth.key(), &USDC_MINT) @ BideError::InvalidAccount
+    )]
     pub pool_usdc: Box<Account<'info, TokenAccount>>,
-    #[account(mut, token::mint = LEND_USDC_FTOKEN, token::authority = pool_auth)]
+    #[account(
+        mut, token::mint = LEND_USDC_FTOKEN, token::authority = pool_auth,
+        constraint = pool_f_token.key() == util::ata(&pool_auth.key(), &LEND_USDC_FTOKEN) @ BideError::InvalidAccount
+    )]
     pub pool_f_token: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,

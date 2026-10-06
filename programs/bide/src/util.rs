@@ -1,6 +1,20 @@
 use crate::errors::BideError;
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::get_associated_token_address;
 use anchor_spl::token::{self, spl_token, CloseAccount, TokenAccount, Transfer};
+
+/// Canonical vault address: the classic-Token ATA of `mint` owned by `owner` (a program PDA).
+/// Every plan/pool vault is this ATA (shared client + create_plan / init_pool flows).
+pub fn ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    get_associated_token_address(owner, mint)
+}
+
+/// Reject any token account that isn't the canonical ATA(mint, owner). A third party can create other token
+/// accounts with a PDA as authority; without this check they could substitute them for the real vaults.
+pub fn require_ata(acc: &Pubkey, owner: &Pubkey, mint: &Pubkey) -> Result<()> {
+    require_keys_eq!(*acc, ata(owner, mint), BideError::InvalidAccount);
+    Ok(())
+}
 
 /// Unpack an SPL token account and check mint (+ optional owner).
 pub fn check_token_account(acc: &AccountInfo, mint: &Pubkey, owner: Option<&Pubkey>) -> Result<TokenAccount> {
