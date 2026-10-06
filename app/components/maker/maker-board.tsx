@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Gavel, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -18,7 +18,11 @@ import { buildTakeRoundTx, explainTxError } from "@/lib/tx";
 import { useProgram } from "@/hooks/use-program";
 import { useNow } from "@/hooks/use-now";
 
-type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; rounds: DecodedRound[] };
+type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; rounds: DecodedRound[]; stale: boolean };
+
+const POLL_MS = 4000;
+const MAX_BACKOFF_MS = 60_000;
+const isRateLimited = (e: unknown) => /429|too many requests|rate limit/i.test(e instanceof Error ? e.message : String(e));
 
 function AuctionCard({ r, now }: { r: DecodedRound; now: number }) {
   const { connection } = useConnection();
@@ -104,23 +108,37 @@ export function MakerBoard() {
   const program = useProgram();
   const client = program.status === "ready" ? program.client : null;
   const [load, setLoad] = useState<Load>({ status: "loading" });
+  /** Next poll delay: POLL_MS normally, doubled on each 429 (capped), reset on success. */
+  const delay = useRef(POLL_MS);
 
   const refresh = useCallback(async () => {
     if (!client) return;
     try {
       const rounds = await client.fetchAuctionRounds(connection);
-      setLoad({ status: "ready", rounds: rounds.filter((r) => r.status === "auction") });
+      delay.current = POLL_MS;
+      setLoad({ status: "ready", rounds: rounds.filter((r) => r.status === "auction"), stale: false });
     } catch (e) {
-      setLoad({ status: "error", message: e instanceof Error ? e.message : "RPC error" });
+      delay.current = isRateLimited(e) ? Math.min(MAX_BACKOFF_MS, delay.current * 2) : POLL_MS;
+      // Keep the last good rows (flagged stale) instead of replacing the board with an error.
+      setLoad((prev) =>
+        prev.status === "ready" ? { ...prev, stale: true } : { status: "error", message: e instanceof Error ? e.message : "RPC error" },
+      );
     }
   }, [client, connection]);
 
   useEffect(() => {
     if (!client) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refresh();
-    const t = setInterval(refresh, 4000);
-    return () => clearInterval(t);
+    let alive = true;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const loop = async () => {
+      await refresh();
+      if (alive) t = setTimeout(loop, delay.current);
+    };
+    loop();
+    return () => {
+      alive = false;
+      if (t) clearTimeout(t);
+    };
   }, [client, refresh]);
 
   if (program.status === "checking") return <Skeleton className="h-64" />;
@@ -144,18 +162,29 @@ export function MakerBoard() {
       </EmptyState>
     );
   const live = load.rounds.filter((r) => auctionPhase(r, now) !== "over");
+  const staleBadge = load.stale ? (
+    <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+      <Badge variant="outline" className="rounded-full">
+        Stale
+      </Badge>
+      Couldn&apos;t refresh from Solana just now; showing the last auctions we read. Retrying automatically.
+    </p>
+  ) : null;
   if (live.length === 0)
     return (
-      <EmptyState icon={<Gavel />} title="No auctions running right now">
+      <EmptyState icon={<Gavel />} title={load.stale ? "No auctions in the last read" : "No auctions running right now"}>
         Standard rounds auction daily from 08:00 to 08:30 UTC; quick rounds open at the start of every 10-minute window. This page checks
         Solana every few seconds.
       </EmptyState>
     );
   return (
-    <ul className="grid gap-4 md:grid-cols-2">
-      {live.map((r) => (
-        <AuctionCard key={r.pubkey} r={r} now={now} />
-      ))}
-    </ul>
+    <div className="grid gap-3">
+      {staleBadge}
+      <ul className="grid gap-4 md:grid-cols-2">
+        {live.map((r) => (
+          <AuctionCard key={r.pubkey} r={r} now={now} />
+        ))}
+      </ul>
+    </div>
   );
 }

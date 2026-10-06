@@ -13,6 +13,39 @@ const ROUND_DISC = Uint8Array.from(
   (IDL as { accounts: { name: string; discriminator: number[] }[] }).accounts.find((a) => a.name === "Round")!.discriminator,
 );
 
+type IdlTy = string | { defined?: { name: string } | string; array?: [IdlTy, number]; option?: IdlTy; vec?: IdlTy };
+type IdlTypeDef = { name: string; type: { kind: string; fields?: { name: string; type: IdlTy }[]; variants?: { name: string; fields?: unknown[] }[] } };
+const PRIM: Record<string, number> = { bool: 1, u8: 1, i8: 1, u16: 2, i16: 2, u32: 4, i32: 4, f32: 4, u64: 8, i64: 8, f64: 8, u128: 16, i128: 16, pubkey: 32, publicKey: 32 };
+
+/** Borsh size of a fixed-layout IDL type, or null if it contains anything variable (vec/string/option/data enum). */
+function fixedSize(t: IdlTy, types: IdlTypeDef[]): number | null {
+  if (typeof t === "string") return PRIM[t] ?? null;
+  if (t.array) {
+    const inner = fixedSize(t.array[0], types);
+    return inner === null ? null : inner * t.array[1];
+  }
+  if (t.defined) {
+    const name = typeof t.defined === "string" ? t.defined : t.defined.name;
+    const def = types.find((d) => d.name === name);
+    if (!def) return null;
+    if (def.type.kind === "enum") return def.type.variants?.every((v) => !v.fields?.length) ? 1 : null;
+    let n = 0;
+    for (const f of def.type.fields ?? []) {
+      const s = fixedSize(f.type, types);
+      if (s === null) return null;
+      n += s;
+    }
+    return n;
+  }
+  return null;
+}
+
+/** On-chain Round account size (8-byte discriminator + fields), derived from the IDL so it tracks program upgrades. */
+const ROUND_DATA_SIZE = (() => {
+  const s = fixedSize({ defined: { name: "Round" } }, (IDL as unknown as { types: IdlTypeDef[] }).types);
+  return s === null ? null : 8 + s;
+})();
+
 export interface DecodedRound {
   pubkey: string;
   plan: string;
@@ -184,6 +217,8 @@ function makeClient(conn: Connection): BideProgramClient {
       const rows = await c.getProgramAccounts(PROGRAM_ID, {
         commitment: "confirmed",
         filters: [
+          // dataSize first: the RPC can skip every non-Round account cheaply (A-H1: keeps the 4 s poll light).
+          ...(ROUND_DATA_SIZE ? [{ dataSize: ROUND_DATA_SIZE }] : []),
           { memcmp: { offset: 0, bytes: bs58.encode(ROUND_DISC) } },
           { memcmp: { offset: ROUND_STATUS_OFFSET, bytes: bs58.encode(Uint8Array.from([0])) } },
         ],
