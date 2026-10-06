@@ -21,6 +21,22 @@ const WSOL = new PublicKey("So11111111111111111111111111111111111111112");
 export const SPOT_AGE_MARGIN_SECS = 15;
 /** Program errors on take_round that a later feed update can clear. */
 const RETRY_PROGRAM_ERRORS = new Set(["StalePrice", "PriceConfidenceTooWide"]);
+/** Program errors that end the round for every bot (no one can take it any more). */
+const TERMINAL_PROGRAM_ERRORS = new Set(["AuctionOver", "WrongStatus"]);
+/** Retry pricing an unpriced round after this long (W-H2: a failed quote must not blacklist the round). */
+export const UNPRICED_RETRY_MS = 5_000;
+
+/**
+ * Who stands down after a failed take_round (W-L7):
+ *  - "retry": transient / feed-clearable → the round stays open to all bots;
+ *  - "round": terminal (AuctionOver / WrongStatus) → every bot stands down;
+ *  - "bot":   any other program rejection → only this bot stops on this round; the others keep bidding.
+ */
+export function takeFailureScope(pe: { name?: string; retryable: boolean }): "retry" | "bot" | "round" {
+  if (pe.retryable || (pe.name && RETRY_PROGRAM_ERRORS.has(pe.name))) return "retry";
+  if (pe.name && TERMINAL_PROGRAM_ERRORS.has(pe.name)) return "round";
+  return "bot";
+}
 
 interface Bot { profile: MakerProfile; kp: Keypair; inv?: Inventory; invAt: number }
 /** One bot's decided bid for one round (null bid = pass / no bid). Persisted to maker_bids. */
@@ -30,7 +46,7 @@ export interface BotBid {
 }
 interface RoundView { priced: boolean; fair: bigint; fairIv: number; spot: number; fallbackBids: Map<string, { bid: bigint; spread: number }>; bids: Map<string, BotBid>; at: number }
 
-export interface MakersOptions { repo?: Repo; agents?: MakerAgents | null }
+export interface MakersOptions { repo?: Repo; agents?: MakerAgents | null; unpricedRetryMs?: number }
 
 /** Wait at most this long after auction start for a pending stance before falling back. */
 export const STANCE_GRACE_SECS = 15;
@@ -66,6 +82,9 @@ export class Makers {
   private bots: Bot[];
   private seen = new Map<string, RoundView>();
   private attempted = new Set<string>();
+  /** `${round}|${bot}`: this bot hit a non-terminal program rejection on this round; other bots may still take it. */
+  private botAttempted = new Set<string>();
+  private unpricedRetryMs: number;
   private staleLogged = new Map<string, number>();
   /** Bid inserts in flight (a take must not mark `took` before its row exists). */
   private persisting = new Map<string, Promise<void>>();
@@ -75,6 +94,7 @@ export class Makers {
     this.bots = keys.map((k, i) => ({ profile: { ...(DEFAULT_PROFILES[i] ?? DEFAULT_PROFILES[0]!), name: k.name }, kp: k.kp, invAt: 0 }));
     this.repo = opts.repo;
     this.agents = opts.agents ?? null;
+    this.unpricedRetryMs = opts.unpricedRetryMs ?? UNPRICED_RETRY_MS;
     log.info("makers", { bots: this.bots.map((b) => ({ name: b.profile.name, pubkey: b.kp.publicKey.toBase58(), volTilt: b.profile.volTilt })), llm: !!this.agents });
   }
   setAgents(a: MakerAgents | null) { this.agents = a; }
@@ -99,16 +119,21 @@ export class Makers {
     return { ...b.inv, openNotional };
   }
 
-  /** Price a round once (consensus fair + spot) and each bot's deterministic fallback bid (tilted vol, fresh spread). */
+  /**
+   * Price a round once (consensus fair + spot) and each bot's deterministic fallback bid (tilted vol, fresh spread).
+   * Only priced views are kept for good; a failed pricing is retried every `unpricedRetryMs` while the round is in
+   * Auction (tick() only visits Auction rounds), so one bad venue/spot refresh can't keep the bots out of the auction.
+   */
   private async view(r: RoundState, s: ChainSnapshot): Promise<RoundView | null> {
     const cached = this.seen.get(r.pubkey);
-    if (cached) return cached.priced ? cached : null;
+    if (cached?.priced) return cached;
+    if (cached && Date.now() - cached.at < this.unpricedRetryMs) return null;
     const asset = s.assets.find((a) => a.pubkey === r.asset);
     const ep = s.epochs.find((e) => e.pubkey === r.epoch);
     if (!asset) return null;
     const type = r.kind === "Put" ? "put" : "call";
     const q = await this.pricer.quote(asset.symbol, type, Number(r.strike) / 1e6, r.expiry * 1000, Number(r.size) / 10 ** asset.decimals, ep?.kind === "Quick");
-    if (!q.ok) { log.info("cannot price round, bots skip", { round: r.pubkey, reason: q.reason }); this.seen.set(r.pubkey, { priced: false, fair: 0n, fairIv: 0, spot: 0, fallbackBids: new Map(), bids: new Map(), at: Date.now() }); return null; }
+    if (!q.ok) { log.info("cannot price round yet, will retry", { round: r.pubkey, reason: q.reason, retryInMs: this.unpricedRetryMs }); this.seen.set(r.pubkey, { priced: false, fair: 0n, fairIv: 0, spot: 0, fallbackBids: new Map(), bids: new Map(), at: Date.now() }); return null; }
     const T = Math.max(r.expiry - s.now, 1) / (365 * 86400);
     const sizeWhole = Number(r.size) / 10 ** asset.decimals;
     const fallbackBids = new Map<string, { bid: bigint; spread: number }>();
@@ -153,14 +178,14 @@ export class Makers {
     const s = await this.snapshots.get();
     if (!s) return;
     const auctions = s.rounds.filter((r) => r.status === "Auction");
-    for (const [k, v] of this.seen) if (Date.now() - v.at > 3_600_000) { this.seen.delete(k); this.staleLogged.delete(k); for (const b of this.bots) this.persisting.delete(`${k}|${b.profile.name}`); }
+    for (const [k, v] of this.seen) if (Date.now() - v.at > 3_600_000) { this.seen.delete(k); this.staleLogged.delete(k); for (const b of this.bots) { this.persisting.delete(`${k}|${b.profile.name}`); this.botAttempted.delete(`${k}|${b.profile.name}`); } }
     for (const r of auctions) {
       if (this.attempted.has(r.pubkey)) continue;
       const v = await this.view(r, s);
       if (!v) continue;
       const asset = s.assets.find((a) => a.pubkey === r.asset)!;
       // Highest bid first: with a falling price, the bot willing to pay more is the one the auction reaches first.
-      const ranked = this.bots.map((b) => ({ b, d: this.bidFor(r, s, v, b) })).filter((x) => x.d && x.d.bid !== null)
+      const ranked = this.bots.filter((b) => !this.botAttempted.has(`${r.pubkey}|${b.profile.name}`)).map((b) => ({ b, d: this.bidFor(r, s, v, b) })).filter((x) => x.d && x.d.bid !== null)
         .sort((x, y) => (y.d!.bid! > x.d!.bid! ? 1 : y.d!.bid! < x.d!.bid! ? -1 : 0));
       for (const { b, d: bb } of ranked) {
         const bid = bb!.bid!;
@@ -194,7 +219,10 @@ export class Makers {
           const pe = parseProgramError(e);
           log.warn("take_round failed", { round: r.pubkey, bot: b.profile.name, err: pe.name, msg: pe.message.slice(0, 200) });
           // StalePrice / PriceConfidenceTooWide can clear on the next feed update: retry this round, not give up.
-          if (pe.retryable || (pe.name && RETRY_PROGRAM_ERRORS.has(pe.name))) this.attempted.delete(r.pubkey);
+          // Terminal errors end the round for everyone; any other rejection only stands this bot down (W-L7).
+          const scope = takeFailureScope(pe);
+          if (scope !== "round") this.attempted.delete(r.pubkey);
+          if (scope === "bot") this.botAttempted.add(`${r.pubkey}|${b.profile.name}`);
         }
         break;
       }
