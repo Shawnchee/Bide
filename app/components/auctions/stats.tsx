@@ -40,25 +40,27 @@ export function AuctionStats() {
   }
 
   if (filled === 0)
-    return <p className="mb-8 text-xs text-muted-foreground">No rounds filled yet. Totals appear after the first paid round.</p>;
+    return <p className="mb-8 text-xs text-muted-foreground">No buyer has paid yet. Totals show after the first.</p>;
 
   return (
-    <section aria-label="Round totals" className="mb-8 grid gap-2">
+    <section aria-label="Totals" className="mb-8 grid gap-2">
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border bg-border lg:grid-cols-4">
         <div className="bg-card p-4">
-          <Stat label="Rounds filled" value={filled} />
+          <Stat label="Rounds paid" value={filled} />
         </div>
         <div className="bg-card p-4">
-          <Stat label="Paid to users after fee" value={usd4(net)} />
+          <Stat label="Paid to users" value={usd4(net)} sub="after Bide fees" />
         </div>
         <div className="bg-card p-4">
-          <Stat label="Avg premium per round" value={pctN ? `${((pctSum / pctN) * 100).toFixed(3)}%` : "—"} sub="of notional, after fee" />
+          <div title="Average upfront pay (premium) as a share of the amount covered, after fee">
+            <Stat label="Average pay per round" value={pctN ? `${((pctSum / pctN) * 100).toFixed(3)}%` : "—"} sub="of amount covered" />
+          </div>
         </div>
         <div className="bg-card p-4">
           <Stat label="Bide fees" value={usd4(fees)} />
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">Daily rounds pay far more than 10-minute ones; devnet Lend pays ≈ $0.</p>
+      <p className="text-xs text-muted-foreground">Day-long rounds pay far more than 10-minute ones.</p>
     </section>
   );
 }
