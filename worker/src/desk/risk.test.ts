@@ -127,3 +127,20 @@ test("risk state never contains plan bounds", () => {
   assert.ok(s.includes("CPI") || s.includes("FOMC"), "events before expiry included");
   assert.equal((state as any).market.pricing_cell.premium_floor, "5400000");
 });
+
+test("risk state scrubs plan bounds the Quant repeated in its rationale", () => {
+  const plan = fixturePlan({ strike_min: "104000000", strike_max: "110000000", min_premium_bps_per_day: 17, max_expiry_secs: 1234567, horizon_end: 1799999999 });
+  const traces: ToolTrace[] = [
+    { call_id: "1", name: "get_plan", args: {}, ok: true, result: { ...plan, strike_min_usd: "$104.00" }, started_at: 0, duration_ms: 0, attempt: 0 },
+  ];
+  const proposal = { action: "open" as const, strike: "110000000", size: "1500000000", expiry: EXP.w3, auction_secs: 30, premium_start: "9100000", premium_floor: "5400000",
+    rationale: "Spot is 9% above the $110 strike, so a 3-week epoch fits. The user's strike range is $104 to $110. Minimum yield is 17 bps per day. Fill probability is 0.62." };
+  const state = buildRiskState({ proposal, traces, asset: "SOL", asset_decimals: 9, round_kind: "put", patience: "balanced", now_ms: NOW_MS });
+  const r = (state as any).proposal.rationale as string;
+  assert.ok(r.includes("$110 strike"), "proposal's own strike stays");
+  assert.ok(r.includes("Fill probability is 0.62"));
+  assert.ok(!r.includes("104") && !r.includes("17 bps") && !/strike range/i.test(r), `rationale leaks bounds: ${r}`);
+  assert.match(r, /plan-bound references removed/);
+  const clean = buildRiskState({ proposal: { ...proposal, rationale: "Fill probability is 0.62." }, traces, asset: "SOL", asset_decimals: 9, round_kind: "put", patience: "balanced", now_ms: NOW_MS });
+  assert.equal((clean as any).proposal.rationale, "Fill probability is 0.62.");
+});

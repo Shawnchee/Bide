@@ -71,7 +71,7 @@ export function buildRiskState(i: RiskStateInput): Record<string, unknown> {
       premium_start_usd: p.premium_start ? usd(p.premium_start) : null,
       premium_floor_usd: p.premium_floor ? usd(p.premium_floor) : null,
       strike_vs_spot_pct: p.strike && spotPrice ? pctChange(BigInt(spotPrice), BigInt(p.strike)) : null,
-      rationale: p.rationale,
+      rationale: scrubRationale(p.rationale, i.traces, p),
     },
     market: {
       spot_usd: spotPrice ? usdPrice(spotPrice) : null,
@@ -85,4 +85,54 @@ export function buildRiskState(i: RiskStateInput): Record<string, unknown> {
     events_before_expiry: eventsBetween(now, expiry + 86_400).map((e) => ({ name: e.name, at_utc: e.at_utc, hours_before_expiry: Math.round((expiry - e.at_unix) / 360) / 10 })),
     quant_tool_errors: i.traces.filter((t) => !t.ok).map((t) => ({ tool: t.name, error: t.error })),
   };
+}
+
+/** Plan-bound keys in get_plan output (strike range, target, minimum yield, deadline, limits, remaining size). */
+const BOUND_KEY = /(min|max|target|deadline|horizon|limit|bound|range|remaining|goal|user_price|lock|exit)/i;
+/** Words that only make sense when the sentence talks about the user's limits. */
+const BOUND_WORDS = /\b(target(ed)? (price|strike)|strike (range|band|bounds?|min|max)|min(imum)?[ _-]?(yield|premium|pay|bps)|max(imum)?[ _-]?(expiry|rounds?)|deadline|horizon|user'?s? (min|max|limit|bound|target|price)|plan (bounds?|limits?)|within (the )?(bounds?|limits?|range)|(upper|lower) bound|rate limit)\b/i;
+
+function boundTokens(traces: ToolTrace[], keep: Set<string>): Set<string> {
+  const out = new Set<string>();
+  const add = (v: unknown) => {
+    const str = String(v).trim();
+    if (!str || str.length > 40) return;
+    for (const m of str.match(/\d[\d,]*(\.\d+)?/g) ?? []) {
+      const n = m.replace(/,/g, "");
+      if (n.replace(/\D/g, "").length < 2) continue; // single digits are too common to redact on
+      const variants = [n, String(Number(n)), Number(n).toFixed(2)];
+      for (const x of variants) if (!keep.has(x)) out.add(x);
+    }
+  };
+  const walk = (o: unknown, boundCtx: boolean, depth: number) => {
+    if (depth > 4 || o === null || o === undefined) return;
+    if (typeof o !== "object") { if (boundCtx) add(o); return; }
+    for (const [k, v] of Object.entries(o as Record<string, unknown>)) walk(v, boundCtx || BOUND_KEY.test(k), depth + 1);
+  };
+  for (const t of traces) if (t.name === "get_plan" && t.ok) walk(t.result, false, 0);
+  return out;
+}
+
+/**
+ * The Quant's free text sometimes repeats the plan bounds it read from get_plan (strike range, minimum yield,
+ * deadline). Risk must judge without them, so drop every sentence that names a bound or quotes a bound value.
+ * Values the proposal itself carries (strike, expiry, premiums) are not bounds and stay.
+ */
+export function scrubRationale(rationale: string | null | undefined, traces: ToolTrace[], p?: Partial<QuantProposal>): string | null {
+  if (!rationale) return rationale ?? null;
+  const keep = new Set<string>();
+  for (const v of [p?.strike, p?.size, p?.expiry, p?.premium_start, p?.premium_floor, p?.auction_secs]) {
+    if (v === null || v === undefined) continue;
+    keep.add(String(v));
+    if (p?.strike && v === p.strike) { const usdN = Number(v) / 1e6; keep.add(String(usdN)); keep.add(usdN.toFixed(2)); }
+  }
+  const tokens = boundTokens(traces, keep);
+  const sentences = rationale.split(/(?<=[.!?])\s+/);
+  const kept = sentences.filter((sen) => {
+    if (BOUND_WORDS.test(sen)) return false;
+    const nums = (sen.match(/\d[\d,]*(\.\d+)?/g) ?? []).map((m) => m.replace(/,/g, ""));
+    return !nums.some((n) => tokens.has(n) || tokens.has(String(Number(n))) || tokens.has(Number(n).toFixed(2)));
+  });
+  if (kept.length === sentences.length) return rationale;
+  return kept.length ? `${kept.join(" ")} [plan-bound references removed]` : "[rationale withheld: it referenced the plan's bounds]";
 }
