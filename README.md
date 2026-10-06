@@ -68,6 +68,13 @@ flowchart LR
 
 "The agent is allowed to try; the program decides." The prompt does not forbid out-of-bounds values. A proposal outside the user's limits becomes a public failed transaction.
 
+### Yield, honestly
+
+- **Devnet Jupiter Lend pays ≈ $0** — no borrowers. On-chain exchange rates on 6 Oct 15:40 UTC: USDC `token_exchange_price` 1.010325 (flat vs 5 Oct), WSOL 1.000000 (never accrued).
+- **Mainnet Lend pays ≈ 4% APY** (Jupiter API reference). It accrues continuously (the jlToken share price rises), not as a daily payout. In Bide it stays in Lend: `withdraw_collateral` pays only what the counterparty is owed; the interest reaches the user on `close_plan` / `expire_plan`.
+- **The premium is the main income.** The daily round [`5Ccf…dpcc`](https://explorer.solana.com/address/5CcfmgSseQNn8jQUWCDpBx1pJLrtzzj5ZLUCNbRydpcc?cluster=devnet) paid ≈ 0.54% of notional (after fee) for ~24 h, vs ≈ 0.011%/day for Lend at 4% APY. Quick (10-minute) rounds pay 0.001–0.12% of notional each.
+- **Totals so far** (6 Oct 15:35 UTC): 22 paid rounds, $0.1226 to users after fee, $0.0136 in Bide fees. Live on `/auctions`.
+
 ## Evidence (devnet)
 
 All links are Solana Explorer on devnet. Every signature below was re-checked against devnet RPC on 6 Oct 2026. Amounts and context: [notes/integration.md](notes/integration.md), [notes/data-flow-fixes.md](notes/data-flow-fixes.md), [notes/stress-test.md](notes/stress-test.md).
