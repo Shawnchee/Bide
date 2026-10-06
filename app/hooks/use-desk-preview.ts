@@ -48,6 +48,8 @@ function fromRow(row: DeskRunRow): DeskPreviewData {
   };
 }
 
+const GIVE_UP_MS = 240_000;
+
 const isTerminal = (d: DeskPreviewData) => Boolean(d.final?.status) || d.status === "error";
 
 /** Runs a desk preview through /api/desk/preview and streams steps from Supabase desk_runs. */
@@ -83,9 +85,14 @@ export function useDeskPreview() {
       }
     };
     const t = setInterval(() => {
-      if (Date.now() - startedAt > 120_000) {
+      // Runs take 50–100 s, plus queueing behind live keeper rounds (they always go first).
+      if (Date.now() - startedAt > GIVE_UP_MS) {
         stop();
-        setState((s) => ({ status: "error", message: "The desk is taking longer than usual. Try again.", data: "data" in s ? s.data : null }));
+        setState((s) => ({
+          status: "error",
+          message: "The desk is busy with live rounds and hasn't reached your preview yet. Try again in a few minutes — you can still start the plan.",
+          data: "data" in s ? s.data : null,
+        }));
         return;
       }
       poll();
@@ -106,8 +113,11 @@ export function useDeskPreview() {
         });
         const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
         if (!res.ok) {
+          const retry = Number(res.headers.get("retry-after") ?? body.retry_after ?? 0);
           const msg =
-            res.status === 503 || res.status === 502
+            res.status === 429
+              ? `The desk is busy right now. Try again in ${retry > 0 ? `${Math.ceil(retry)}s` : "a minute"} — you can still review and start the plan.`
+              : res.status === 503 || res.status === 502
               ? "The AI desk is offline right now, so there's no live quote. You can still review and start the plan — the desk prices each round when it opens."
               : (body.error as string) || "The desk couldn't price this plan.";
           setState({ status: "error", message: msg, data: null });

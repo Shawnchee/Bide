@@ -1,47 +1,27 @@
 import { WorkerError, workerFetch } from "@/lib/server/worker";
+import { checkPreviewDraft, clientIp, relay } from "../../_lib/guard";
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED_KEYS = [
-  "asset",
-  "side",
-  "quick",
-  "target_strike",
-  "exit_strike",
-  "size_total",
-  "lock_strike",
-  "min_premium_bps_per_day",
-  "max_expiry_secs",
-  "horizon_end",
-  "patience",
-  "band",
-  "exit_band",
-  "max_rounds_per_day",
-  "owner",
-] as const;
-
-/** Forwards a draft plan to the worker's desk preview. Only whitelisted fields pass through. */
+/** Forwards a draft plan to the worker's desk preview. Strictly validated here and again (authoritatively) on the worker. */
 export async function POST(req: Request) {
-  let raw: Record<string, unknown>;
+  let raw: unknown;
   try {
     raw = await req.json();
   } catch {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
-  const draft: Record<string, unknown> = {};
-  for (const k of ALLOWED_KEYS) if (k in raw) draft[k] = raw[k];
-  if (typeof draft.asset !== "string" || typeof draft.side !== "string" || typeof draft.target_strike !== "string") {
-    return Response.json({ error: "asset, side and target_strike are required" }, { status: 400 });
-  }
+  const checked = checkPreviewDraft(raw);
+  if ("error" in checked) return Response.json({ error: checked.error }, { status: 400 });
+  const ip = clientIp(req);
   try {
     const res = await workerFetch("/desk/preview", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(draft),
+      headers: { "Content-Type": "application/json", ...(ip ? { "X-Client-IP": ip } : {}) },
+      body: JSON.stringify(checked.draft),
       timeoutMs: 15000,
     });
-    const body = await res.json().catch(() => null);
-    return Response.json(body ?? { error: "bad worker response" }, { status: res.ok ? 200 : res.status });
+    return relay(res);
   } catch (e) {
     const err = e as WorkerError;
     return Response.json({ error: err.message }, { status: err.status ?? 502 });
