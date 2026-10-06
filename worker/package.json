@@ -1,0 +1,32 @@
+{
+  "name": "@bide/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "tsx --test 'test/**/*.test.ts' 'src/**/*.test.ts'",
+    "pricer:live": "tsx src/pricer/live.ts"
+  },
+  "dependencies": {
+    "@bide/shared": "workspace:*",
+    "@anchor-lang/core": "1.0.3",
+    "@solana/web3.js": "^1.98.0",
+    "@solana/spl-token": "^0.4.13",
+    "@pythnetwork/pyth-solana-receiver": "^0.16.0",
+    "@pythnetwork/hermes-client": "^3.1.0",
+    "@supabase/supabase-js": "^2.47.0",
+    "hono": "^4.6.0",
+    "@hono/node-server": "^1.13.0",
+    "zod": "^3.24.0",
+    "dotenv": "^16.4.7",
+    "bn.js": "^5.2.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "@types/node": "^22.10.0",
+    "@types/bn.js": "^5.1.6"
+  }
+}

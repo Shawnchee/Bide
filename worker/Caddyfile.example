@@ -1,0 +1,22 @@
+# /etc/caddy/Caddyfile — HTTPS in front of the worker (only 80/443 open on the VM firewall).
+# Replace worker.example.com with the VM's DNS name (A record → VM public IP); Caddy gets the cert itself.
+worker.example.com {
+	encode gzip
+	# Public endpoints
+	handle /health {
+		reverse_proxy 127.0.0.1:8787
+	}
+	handle /quotes/* {
+		reverse_proxy 127.0.0.1:8787
+	}
+	# App → worker (shared secret checked by the worker)
+	handle /desk/* {
+		reverse_proxy 127.0.0.1:8787
+	}
+	handle {
+		respond "not found" 404
+	}
+	log {
+		output file /var/log/caddy/bide-worker.log
+	}
+}
