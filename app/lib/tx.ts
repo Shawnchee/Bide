@@ -97,7 +97,12 @@ export function explainTxError(e: unknown): { message: string; cancelled: boolea
   if (/reject|cancel|denied|declined/i.test(raw)) return { message: "You cancelled in your wallet. Nothing was sent.", cancelled: true };
   if (e instanceof ProgramNotReadyError) return { message: raw, cancelled: false };
   if (/blockhash/i.test(raw)) return { message: "The network was busy. Try again.", cancelled: false };
-  if (/insufficient (funds|lamports)/i.test(raw) || /0x1\b/.test(raw))
+  // Only the real insufficient-balance cases: SPL Token / Token-2022 InsufficientFunds (custom error 0x1 *from the token
+  // program*) or the system program's lamports message. A bare 0x1 from any other program is not a balance problem (A-L1).
+  const err = e as { logs?: string[]; transactionLogs?: string[] } | null;
+  const logs = [raw, ...((err && (err.logs ?? err.transactionLogs)) || [])].join("\n");
+  const splInsufficient = /Program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA|TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb) failed: custom program error: 0x1\b/.test(logs);
+  if (/insufficient (funds|lamports)/i.test(logs) || splInsufficient)
     return { message: "Not enough balance in your wallet for this amount plus network fees.", cancelled: false };
   const bideErr = parseBideError(e);
   const named: Record<string, string> = {
