@@ -15,6 +15,23 @@ export type PlanEvent =
   | { type: "PlanFlipped"; plan: string; owner: string }
   | { type: "PlanExpired"; plan: string; owner: string };
 
+/**
+ * Exercise rule, same as resolve_round (programs/bide settle.rs): put iff settle < strike, call iff settle > strike.
+ * Used when a Live round vanishes between mirror ticks on a Resolved epoch (the keeper can resolve + settle/withdraw
+ * inside one 15 s interval), so we never observed its Resolved state and must not guess "not exercised" (W-M1).
+ */
+export function exercisedAtSettle(kind: string, strike: bigint, settlePrice: bigint): boolean {
+  if (typeof strike !== "bigint" || typeof settlePrice !== "bigint" || settlePrice <= 0n) return false;
+  return kind.toLowerCase() === "put" ? settlePrice < strike : settlePrice > strike;
+}
+
+/** For a Live round that vanished: if its epoch is Resolved, the derived outcome; otherwise null. */
+export function vanishedLiveOutcome(last: RoundState, s: ChainSnapshot): { exercised: boolean; settlePrice: bigint } | null {
+  const ep = s.epochs.find((e) => e.pubkey === last.epoch);
+  if (ep?.status !== "Resolved") return null;
+  return { exercised: exercisedAtSettle(last.kind, last.strike, ep.settlePrice), settlePrice: ep.settlePrice };
+}
+
 export function inferClosedStatus(last: RoundState, s: ChainSnapshot): RoundState["status"] {
   const ep = s.epochs.find((e) => e.pubkey === last.epoch);
   if (last.status === "Auction") return "Cancelled";
@@ -40,8 +57,8 @@ export function transitions(prev: ChainSnapshot | null, next: ChainSnapshot): Pl
   }
   for (const p of prev.rounds) {
     if (nextRounds.has(p.pubkey) || p.status !== "Live") continue;
-    const ep = next.epochs.find((e) => e.pubkey === p.epoch);
-    if (ep?.status === "Resolved") out.push({ type: "RoundResolved", plan: p.plan, owner: owner(p.plan), round: p.pubkey, exercised: false, settlePriceUsd: Number(ep.settlePrice) / 1e6, strikeUsd: Number(p.strike) / 1e6 });
+    const o = vanishedLiveOutcome(p, next);
+    if (o) out.push({ type: "RoundResolved", plan: p.plan, owner: owner(p.plan), round: p.pubkey, exercised: o.exercised, settlePriceUsd: Number(o.settlePrice) / 1e6, strikeUsd: Number(p.strike) / 1e6 });
   }
   const prevPlans = new Map(prev.plans.map((p) => [p.pubkey, p]));
   for (const pl of next.plans) {
@@ -55,7 +72,7 @@ export function transitions(prev: ChainSnapshot | null, next: ChainSnapshot): Pl
 /** A maker-taken round whose settlement is now known (for the maker P&L ledger). */
 export interface RoundOutcome { round: RoundState; exercised: boolean; settlePrice: bigint; assetDecimals: number }
 
-/** Rounds taken by a maker (not the pool) that just resolved: Live → Resolved, or a Live round that vanished on a Resolved epoch (not exercised). */
+/** Rounds taken by a maker (not the pool) that just resolved: Live → Resolved, or a Live round that vanished on a Resolved epoch (exercise derived from settle vs strike). */
 export function roundOutcomes(prev: ChainSnapshot | null, next: ChainSnapshot): RoundOutcome[] {
   if (!prev) return [];
   const out: RoundOutcome[] = [];
@@ -68,8 +85,8 @@ export function roundOutcomes(prev: ChainSnapshot | null, next: ChainSnapshot): 
   }
   for (const p of prev.rounds) {
     if (nextRounds.has(p.pubkey) || p.status !== "Live" || !p.maker || p.makerIsPool) continue;
-    const ep = next.epochs.find((e) => e.pubkey === p.epoch);
-    if (ep?.status === "Resolved") out.push({ round: p, exercised: false, settlePrice: ep.settlePrice, assetDecimals: dec(p.asset) });
+    const o = vanishedLiveOutcome(p, next);
+    if (o) out.push({ round: p, exercised: o.exercised, settlePrice: o.settlePrice, assetDecimals: dec(p.asset) });
   }
   return out;
 }
@@ -83,7 +100,14 @@ export class Mirror {
     const closed: RoundState[] = [];
     if (this.prev) {
       const live = new Set(s.rounds.map((r) => r.pubkey));
-      for (const r of this.prev.rounds) if (!live.has(r.pubkey) && !["Cancelled", "Settled", "Unwound"].includes(r.status)) closed.push({ ...r, status: inferClosedStatus(r, s) });
+      for (const r of this.prev.rounds) {
+        if (live.has(r.pubkey) || ["Cancelled", "Settled", "Unwound"].includes(r.status)) continue;
+        const row: RoundState = { ...r, status: inferClosedStatus(r, s) };
+        // A Live round that vanished on a Resolved epoch: record the derived exercise + settle price (2 = yes, 1 = no).
+        const o = r.status === "Live" ? vanishedLiveOutcome(r, s) : null;
+        if (o) { row.exercised = o.exercised ? 2 : 1; row.settlePrice = o.settlePrice; }
+        closed.push(row);
+      }
     }
     await this.repo.upsertPlans(s.plans.map(planRow));
     await this.repo.upsertRounds([...s.rounds, ...closed].map(roundRow));
