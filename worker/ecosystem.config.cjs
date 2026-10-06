@@ -4,9 +4,16 @@ const fs = require("node:fs");
 const ENV_FILE = process.env.BIDE_ENV_FILE || "/etc/bide/worker.env";
 const fileEnv = {};
 if (fs.existsSync(ENV_FILE)) {
+  // KEY=value, optional quotes, optional trailing `# comment` (DEPLOY.md's template has them). A quoted value keeps
+  // its `#`s; an unquoted one is cut at the first ` #`. Whitespace is trimmed so a secret never carries a stray space.
   for (const line of fs.readFileSync(ENV_FILE, "utf8").split("\n")) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m) fileEnv[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=(.*)$/);
+    if (!m) continue;
+    let v = m[2].trim();
+    const q = v.match(/^(["'])(.*?)\1/);
+    if (q) v = q[2];
+    else v = v.replace(/\s+#.*$/, "").replace(/^#.*$/, "").trim();
+    fileEnv[m[1]] = v;
   }
 }
 module.exports = {
