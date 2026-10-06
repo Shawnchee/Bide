@@ -152,6 +152,7 @@ export function buildApp(d: HttpDeps) {
   });
 
   app.get("/desk/runs/:id", async (c) => {
+    if (!secretOk(c.req.header("authorization") ?? c.req.header("x-worker-secret"), cfg.workerSharedSecret)) return c.json({ error: "unauthorized" }, 401);
     const r = await d.repo.getDeskRun(c.req.param("id"));
     return r ? c.json(jsonSafe(r)) : c.json({ error: "not found" }, 404);
   });
