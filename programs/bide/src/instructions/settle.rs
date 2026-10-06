@@ -167,7 +167,8 @@ fn check_maker_dest(r: &Round, pool: &Option<Box<Account<Pool>>>, dest: &Account
 
 /// Release the pool's escrow reservation. If the round was exercised, the escrow went to the user and the pool is
 /// owed the other leg (Put: notional USDC, Call: size asset) by withdraw_collateral — book it as a receivable in
-/// reserved_* so pool NAV doesn't dip between resolve_round and withdraw_collateral.
+/// reserved_* so pool NAV doesn't dip between resolve_round and withdraw_collateral. Also removes the round from the
+/// per-kind live sums pool_nav marks at intrinsic value (saturating: a pool migrated with live v1 rounds has zero sums).
 fn release_pool(r: &Round, pool: &mut Option<Box<Account<Pool>>>, exercised: bool) -> Result<()> {
     if !r.maker_is_pool {
         return Ok(());
@@ -176,12 +177,16 @@ fn release_pool(r: &Round, pool: &mut Option<Box<Account<Pool>>>, exercised: boo
     pool.open_notional = pool.open_notional.saturating_sub(r.notional);
     match r.kind {
         RoundKind::Put => {
+            pool.put_open_size = pool.put_open_size.saturating_sub(r.size);
+            pool.put_open_notional = pool.put_open_notional.saturating_sub(r.notional);
             pool.reserved_wsol = pool.reserved_wsol.saturating_sub(r.size);
             if exercised {
                 pool.reserved_usdc = pool.reserved_usdc.checked_add(r.notional).ok_or(BideError::MathOverflow)?;
             }
         }
         RoundKind::Call => {
+            pool.call_open_notional = pool.call_open_notional.saturating_sub(r.notional);
+            pool.call_open_size = pool.call_open_size.saturating_sub(r.size);
             pool.reserved_usdc = pool.reserved_usdc.saturating_sub(r.notional);
             if exercised {
                 pool.reserved_wsol = pool.reserved_wsol.checked_add(r.size).ok_or(BideError::MathOverflow)?;

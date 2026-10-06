@@ -114,4 +114,7 @@ pub mod bide {
     pub fn pool_unlend<'info>(ctx: Context<'info, PoolLend<'info>>, amount: u64) -> Result<()> {
         instructions::pool::pool_unlend(ctx, amount)
     }
+    pub fn migrate_pool(ctx: Context<MigratePool>) -> Result<()> {
+        instructions::pool::migrate_pool(ctx)
+    }
 }

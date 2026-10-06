@@ -365,9 +365,9 @@ pub fn pool_take_round(ctx: Context<PoolTakeRound>) -> Result<()> {
     let epoch = &ctx.accounts.epoch;
     require!(epoch.status == EpochStatus::Open, BideError::EpochNotOpen);
     require!(now < window_start(epoch), BideError::AuctionOver);
-    if r.kind == RoundKind::Put {
-        require_keys_eq!(ctx.accounts.asset.mint, WSOL_MINT, BideError::InvalidMint);
-    }
+    // the pool only holds/marks SOL: its put escrow is WSOL, its call receivable is WSOL, and pool_nav values both at
+    // the SOL spot. A pool call on another asset would book a non-SOL receivable as WSOL (and mark it at SOL spot).
+    require_keys_eq!(ctx.accounts.asset.mint, WSOL_MINT, BideError::InvalidMint);
     // spot guard + spot for NAV (asset is SOL for puts; for calls the pool only needs USDC, but NAV uses SOL spot)
     let spot = oracle::read_spot(&ctx.accounts.asset, &ctx.accounts.spot_feed, now)?;
     require!(
@@ -439,9 +439,18 @@ pub fn pool_take_round(ctx: Context<PoolTakeRound>) -> Result<()> {
     pool.open_notional = open_after;
     pool.spend_window_start = win_start;
     pool.spend_window_spent = spent_after;
+    // per-kind open sums: pool_nav marks each live leg at intrinsic value (see pool::pool_nav)
     match kind {
-        RoundKind::Put => pool.reserved_wsol = pool.reserved_wsol.checked_add(size).ok_or(BideError::MathOverflow)?,
-        RoundKind::Call => pool.reserved_usdc = pool.reserved_usdc.checked_add(notional).ok_or(BideError::MathOverflow)?,
+        RoundKind::Put => {
+            pool.reserved_wsol = pool.reserved_wsol.checked_add(size).ok_or(BideError::MathOverflow)?;
+            pool.put_open_size = pool.put_open_size.checked_add(size).ok_or(BideError::MathOverflow)?;
+            pool.put_open_notional = pool.put_open_notional.checked_add(notional).ok_or(BideError::MathOverflow)?;
+        }
+        RoundKind::Call => {
+            pool.reserved_usdc = pool.reserved_usdc.checked_add(notional).ok_or(BideError::MathOverflow)?;
+            pool.call_open_notional = pool.call_open_notional.checked_add(notional).ok_or(BideError::MathOverflow)?;
+            pool.call_open_size = pool.call_open_size.checked_add(size).ok_or(BideError::MathOverflow)?;
+        }
     }
     let r = &mut ctx.accounts.round;
     r.maker = pool_key;

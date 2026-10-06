@@ -138,7 +138,8 @@ export class BideClient {
   // ---------- plans ----------
   /**
    * create_plan + pre-instructions (CU limit, idempotent vault ATAs).
-   * Sell plans on SOL: the caller must wrap SOL into the owner's WSOL ATA first (same tx is fine).
+   * create_plan pulls principal + LEND_DUST_BUFFER from the owner when the collateral has a Lend market (USDC, WSOL).
+   * Sell plans on SOL: the caller must wrap size + LEND_DUST_BUFFER lamports into the owner's WSOL ATA first (same tx is fine).
    */
   async createPlan(owner: PublicKey, assetMint: PublicKey, a: CreatePlanInput): Promise<{ ixs: TransactionInstruction[]; plan: PublicKey }> {
     const [plan] = planPda(owner, a.nonce, this.programId);
@@ -506,6 +507,14 @@ export class BideClient {
         })
         .instruction(),
     ];
+  }
+
+  /** migrate_pool (admin only, one-shot): grow a v1 Pool account to the current layout (v2 open-option sums = 0). */
+  migratePool(admin: PublicKey) {
+    return this.program.methods
+      .migratePool()
+      .accountsPartial({ admin, config: configPda(this.programId)[0], pool: this.poolAccounts().pool, systemProgram: SystemProgram.programId })
+      .instruction();
   }
 
   setPoolParams(authority: PublicKey, paused: boolean, params: PoolParamsInput) {

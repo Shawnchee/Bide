@@ -187,10 +187,27 @@ pub struct Pool {
     pub paused: bool,
     pub share_mint: Pubkey,
     pub lend_shares: u64,
+    /// USDC held outside the vaults: escrow of live pool Calls (= call_open_notional) + receivables of exercised
+    /// pool Puts awaiting withdraw_collateral.
     pub reserved_usdc: u64,
+    /// WSOL held outside the vaults: escrow of live pool Puts (= put_open_size) + receivables of exercised pool Calls
+    /// awaiting withdraw_collateral.
     pub reserved_wsol: u64,
     pub open_notional: u64,
     pub bump: u8,
     pub lend_auth_bump: u8,
     pub share_mint_bump: u8,
+    // ---- v2 (2026-10-07, appended; old accounts are grown by migrate_pool) ----
+    // Per-kind sums over LIVE pool-held rounds, so pool_nav can mark each option leg at intrinsic value.
+    /// Σ size (WSOL) escrowed by live pool Puts (subset of reserved_wsol).
+    pub put_open_size: u64,
+    /// Σ strike notional (USDC) of live pool Puts: what the pool receives if they are exercised.
+    pub put_open_notional: u64,
+    /// Σ notional (USDC) escrowed by live pool Calls (subset of reserved_usdc).
+    pub call_open_notional: u64,
+    /// Σ size (WSOL) of live pool Calls: what the pool receives if they are exercised.
+    pub call_open_size: u64,
 }
+
+/// Size of a Pool account created before the v2 fields were appended (8-byte discriminator included).
+pub const POOL_V1_LEN: usize = 8 + Pool::INIT_SPACE - 4 * 8;

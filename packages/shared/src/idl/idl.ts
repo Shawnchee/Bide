@@ -883,6 +883,69 @@ export const IDL: Bide = {
       ]
     },
     {
+      "name": "migrate_pool",
+      "discriminator": [
+        55,
+        170,
+        171,
+        123,
+        210,
+        69,
+        39,
+        172
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "open_epoch",
       "discriminator": [
         75,
@@ -3952,10 +4015,18 @@ export const IDL: Bide = {
           },
           {
             "name": "reserved_usdc",
+            "docs": [
+              "USDC held outside the vaults: escrow of live pool Calls (= call_open_notional) + receivables of exercised",
+              "pool Puts awaiting withdraw_collateral."
+            ],
             "type": "u64"
           },
           {
             "name": "reserved_wsol",
+            "docs": [
+              "WSOL held outside the vaults: escrow of live pool Puts (= put_open_size) + receivables of exercised pool Calls",
+              "awaiting withdraw_collateral."
+            ],
             "type": "u64"
           },
           {
@@ -3973,6 +4044,34 @@ export const IDL: Bide = {
           {
             "name": "share_mint_bump",
             "type": "u8"
+          },
+          {
+            "name": "put_open_size",
+            "docs": [
+              "Σ size (WSOL) escrowed by live pool Puts (subset of reserved_wsol)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "put_open_notional",
+            "docs": [
+              "Σ strike notional (USDC) of live pool Puts: what the pool receives if they are exercised."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "call_open_notional",
+            "docs": [
+              "Σ notional (USDC) escrowed by live pool Calls (subset of reserved_usdc)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "call_open_size",
+            "docs": [
+              "Σ size (WSOL) of live pool Calls: what the pool receives if they are exercised."
+            ],
+            "type": "u64"
           }
         ]
       }

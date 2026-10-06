@@ -64,6 +64,10 @@ pub fn init_pool(ctx: Context<InitPool>, params: PoolParams) -> Result<()> {
     p.reserved_usdc = 0;
     p.reserved_wsol = 0;
     p.open_notional = 0;
+    p.put_open_size = 0;
+    p.put_open_notional = 0;
+    p.call_open_notional = 0;
+    p.call_open_size = 0;
     p.bump = ctx.bumps.pool;
     p.lend_auth_bump = ctx.bumps.pool_auth;
     p.share_mint_bump = ctx.bumps.share_mint;
@@ -90,17 +94,57 @@ impl Nav {
     }
 }
 
-/// NAV = USDC vault + Lend USDC (shares × exchange price) + WSOL × spot + escrowed (reserved) funds.
+/// NAV = USDC vault + Lend USDC (shares × exchange price) + WSOL × spot + value of funds held outside the vaults.
+///
+/// Funds outside the vaults (`reserved_*`) are marked per leg (P1, codex_v2 / SPEC decision 2026-10-07):
+/// - live pool Puts: the pool is the put BUYER holding escrowed SOL; at resolution it ends with either the SOL back
+///   (not exercised) or the strike notional in USDC (exercised). Marked at intrinsic value
+///   `max(spot × put_open_size, put_open_notional)`.
+/// - live pool Calls: the pool escrowed the strike notional in USDC; it ends with either that USDC back or `size`
+///   SOL. Marked `max(call_open_notional, spot × call_open_size)`.
+/// - receivables of exercised rounds awaiting withdraw_collateral: USDC at face, WSOL at spot.
+///
+/// Why: marking the escrow at spot alone (the v1 rule) understated NAV whenever a pool option was in the money, and
+/// between resolve_epoch (outcome public) and the permissionless resolve_round (books the receivable) anyone could
+/// mint shares at the stale NAV and redeem after resolve_round, diluting existing LPs. The pool's payoff at
+/// resolution is always ONE of the two legs, so `max(both)` ≥ the post-resolution value at the same spot: a deposit
+/// can never buy shares below what resolve_round will book.
+///
+/// Limitations (documented, accepted):
+/// - Σ max ≥ max Σ: the max is taken over the per-kind SUMS, not per round. With mixed strikes (some puts in, some
+///   out of the money) `max(spot × Σsize, Σnotional)` ≤ `Σ max(spot × size_i, notional_i)`, i.e. the mark can still be
+///   below the exact per-round intrinsic value. It is never below the v1 spot mark, and with one live round per
+///   kind (the common case) it is exact.
+/// - Time value is ignored (the pool is long the options, so NAV is slightly understated before expiry; epochs are
+///   minutes-to-a-day long).
+/// - The mark uses SPOT, not the epoch's settle price (the pool can't see epochs). After resolve_epoch, if spot has
+///   crossed the strike since settlement, the mark overstates the outcome by at most |spot − strike| × size until
+///   resolve_round runs (permissionless; the keeper calls it right away).
+/// - Pools that had live rounds before migrate_pool have zero v2 sums: those rounds fall back to the v1 spot mark
+///   (the reserved_* remainder is treated as receivables). The devnet pool had no take when migrated.
 pub fn pool_nav(pool: &Pool, usdc_vault: u64, wsol_vault: u64, f_shares: u64, lending_usdc: &AccountInfo, spot: u64) -> Result<Nav> {
     let px = lend::token_exchange_price(lending_usdc)?;
-    let wsol_value = math::notional_floor(spot, wsol_vault, 9)?;
-    let reserved_wsol_value = math::notional_floor(spot, pool.reserved_wsol, 9)?;
     Ok(Nav {
         usdc: usdc_vault,
         lend_value: lend::shares_to_assets(f_shares, px)?,
-        wsol_value,
-        reserved_value: pool.reserved_usdc.checked_add(reserved_wsol_value).ok_or(BideError::MathOverflow)?,
+        wsol_value: math::notional_floor(spot, wsol_vault, 9)?,
+        reserved_value: reserved_value(pool, spot)?,
     })
+}
+
+/// Value (USDC base units) of everything the pool holds outside its vaults, per the marking rules on pool_nav.
+pub fn reserved_value(pool: &Pool, spot: u64) -> Result<u64> {
+    // live option legs at intrinsic value
+    let put_leg = math::notional_floor(spot, pool.put_open_size, 9)?.max(pool.put_open_notional);
+    let call_leg = pool.call_open_notional.max(math::notional_floor(spot, pool.call_open_size, 9)?);
+    // the rest of reserved_* is receivables of exercised rounds (put: USDC at face; call: WSOL at spot)
+    let usdc_receivable = pool.reserved_usdc.saturating_sub(pool.call_open_notional);
+    let wsol_receivable_value = math::notional_floor(spot, pool.reserved_wsol.saturating_sub(pool.put_open_size), 9)?;
+    put_leg
+        .checked_add(call_leg)
+        .and_then(|x| x.checked_add(usdc_receivable))
+        .and_then(|x| x.checked_add(wsol_receivable_value))
+        .ok_or(error!(BideError::MathOverflow))
 }
 
 fn f_token_balance(acc: &AccountInfo) -> Result<u64> {
@@ -369,4 +413,147 @@ pub fn set_pool_params(ctx: Context<SetPoolPaused>, paused: bool, params: PoolPa
     p.spend_window_secs = params.spend_window_secs;
     p.spend_window_cap = params.spend_window_cap;
     Ok(())
+}
+
+/// migrate_pool: admin-only, one-shot. Grows a Pool account created before the v2 fields (POOL_V1_LEN bytes) to the
+/// current size; the appended v2 fields (put/call open sums) are zero-initialised by the resize. The admin pays the
+/// extra rent. Takes the pool as an unchecked account because the v1 bytes don't deserialize as the current Pool.
+#[derive(Accounts)]
+pub struct MigratePool<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(seeds = [SEED_CONFIG], bump = config.bump, has_one = admin @ BideError::Unauthorized)]
+    pub config: Box<Account<'info, Config>>,
+    /// CHECK: the ["pool"] PDA; owner, discriminator and v1 length are checked in the handler
+    #[account(mut, seeds = [SEED_POOL], bump)]
+    pub pool: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn migrate_pool(ctx: Context<MigratePool>) -> Result<()> {
+    let pool = ctx.accounts.pool.to_account_info();
+    require_keys_eq!(*pool.owner, crate::ID, BideError::InvalidAccount);
+    let new_len = 8 + Pool::INIT_SPACE;
+    {
+        let d = pool.try_borrow_data()?;
+        require!(d.len() >= 8 && d[..8] == *Pool::DISCRIMINATOR, BideError::InvalidAccount);
+        // only a v1 account can be migrated (re-running on a migrated pool is refused)
+        require!(d.len() == POOL_V1_LEN, BideError::WrongStatus);
+    }
+    let need = Rent::get()?.minimum_balance(new_len).saturating_sub(pool.lamports());
+    if need > 0 {
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.key(),
+                anchor_lang::system_program::Transfer { from: ctx.accounts.admin.to_account_info(), to: pool.clone() },
+            ),
+            need,
+        )?;
+    }
+    pool.resize(new_len)?;
+    // resize zero-fills the grown region; zero the v2 fields explicitly anyway (defensive, documents intent)
+    let mut d = pool.try_borrow_mut_data()?;
+    d[POOL_V1_LEN..new_len].fill(0);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SOL: u64 = 1_000_000_000;
+    const USD: u64 = 1_000_000;
+
+    fn pool() -> Pool {
+        Pool {
+            authority: Pubkey::default(),
+            max_premium_bps_of_notional: 0,
+            max_open_notional: 0,
+            max_utilization_bps: 0,
+            spend_window_secs: 0,
+            spend_window_start: 0,
+            spend_window_cap: 0,
+            spend_window_spent: 0,
+            paused: false,
+            share_mint: Pubkey::default(),
+            lend_shares: 0,
+            reserved_usdc: 0,
+            reserved_wsol: 0,
+            open_notional: 0,
+            bump: 0,
+            lend_auth_bump: 0,
+            share_mint_bump: 0,
+            put_open_size: 0,
+            put_open_notional: 0,
+            call_open_notional: 0,
+            call_open_size: 0,
+        }
+    }
+
+    #[test]
+    fn v1_len_matches_the_old_layout() {
+        // 8 disc + 32 + 2 + 8 + 2 + 4 + 8 + 8 + 8 + 1 + 32 + 8*4 + 3 = 148 (the devnet pool's size before v2)
+        assert_eq!(POOL_V1_LEN, 148);
+        assert_eq!(8 + Pool::INIT_SPACE, 180);
+    }
+
+    #[test]
+    fn put_leg_marked_at_intrinsic() {
+        // live put: 1 SOL escrowed, strike 100 → pool gets 100 USDC if exercised
+        let mut p = pool();
+        p.reserved_wsol = SOL;
+        p.put_open_size = SOL;
+        p.put_open_notional = 100 * USD;
+        assert_eq!(reserved_value(&p, 80 * USD).unwrap(), 100 * USD, "ITM put: strike, not spot");
+        assert_eq!(reserved_value(&p, 120 * USD).unwrap(), 120 * USD, "OTM put: the SOL at spot");
+    }
+
+    #[test]
+    fn call_leg_marked_at_intrinsic() {
+        // live call: 100 USDC escrowed, size 1 SOL → pool gets 1 SOL if exercised
+        let mut p = pool();
+        p.reserved_usdc = 100 * USD;
+        p.call_open_notional = 100 * USD;
+        p.call_open_size = SOL;
+        assert_eq!(reserved_value(&p, 80 * USD).unwrap(), 100 * USD, "OTM call: the escrowed USDC");
+        assert_eq!(reserved_value(&p, 130 * USD).unwrap(), 130 * USD, "ITM call: 1 SOL at spot");
+    }
+
+    #[test]
+    fn receivables_at_face_and_spot_alongside_live_legs() {
+        let mut p = pool();
+        // live put (1 SOL, strike 100) + exercised-put receivable 50 USDC
+        // live call (100 USDC, 1 SOL) + exercised-call receivable 2 SOL
+        p.put_open_size = SOL;
+        p.put_open_notional = 100 * USD;
+        p.call_open_notional = 100 * USD;
+        p.call_open_size = SOL;
+        p.reserved_wsol = SOL + 2 * SOL;
+        p.reserved_usdc = 100 * USD + 50 * USD;
+        // spot 90: put leg 100, call leg 100, usdc rec 50, wsol rec 180
+        assert_eq!(reserved_value(&p, 90 * USD).unwrap(), 430 * USD);
+    }
+
+    #[test]
+    fn mark_never_below_post_resolution_value() {
+        // the pool ends with one of the two legs; the mark is the max of both, at the same spot
+        for spot in [50u64, 99, 100, 101, 150] {
+            let mut p = pool();
+            p.reserved_wsol = SOL;
+            p.put_open_size = SOL;
+            p.put_open_notional = 100 * USD;
+            let mark = reserved_value(&p, spot * USD).unwrap();
+            let exercised = 100 * USD; // receivable after release_pool
+            let not_exercised = spot * USD; // SOL back in the vault, valued at spot
+            assert!(mark >= exercised && mark >= not_exercised);
+        }
+    }
+
+    #[test]
+    fn migrated_v1_live_round_falls_back_to_spot_mark() {
+        // a v1 pool migrated while a put was live: sums are zero, the escrow is valued like a WSOL receivable
+        let mut p = pool();
+        p.reserved_wsol = SOL;
+        assert_eq!(reserved_value(&p, 80 * USD).unwrap(), 80 * USD);
+    }
 }

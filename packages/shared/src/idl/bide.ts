@@ -887,6 +887,69 @@ export type Bide = {
       ]
     },
     {
+      "name": "migratePool",
+      "discriminator": [
+        55,
+        170,
+        171,
+        123,
+        210,
+        69,
+        39,
+        172
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "openEpoch",
       "discriminator": [
         75,
@@ -3956,10 +4019,18 @@ export type Bide = {
           },
           {
             "name": "reservedUsdc",
+            "docs": [
+              "USDC held outside the vaults: escrow of live pool Calls (= call_open_notional) + receivables of exercised",
+              "pool Puts awaiting withdraw_collateral."
+            ],
             "type": "u64"
           },
           {
             "name": "reservedWsol",
+            "docs": [
+              "WSOL held outside the vaults: escrow of live pool Puts (= put_open_size) + receivables of exercised pool Calls",
+              "awaiting withdraw_collateral."
+            ],
             "type": "u64"
           },
           {
@@ -3977,6 +4048,34 @@ export type Bide = {
           {
             "name": "shareMintBump",
             "type": "u8"
+          },
+          {
+            "name": "putOpenSize",
+            "docs": [
+              "Σ size (WSOL) escrowed by live pool Puts (subset of reserved_wsol)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "putOpenNotional",
+            "docs": [
+              "Σ strike notional (USDC) of live pool Puts: what the pool receives if they are exercised."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "callOpenNotional",
+            "docs": [
+              "Σ notional (USDC) escrowed by live pool Calls (subset of reserved_usdc)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "callOpenSize",
+            "docs": [
+              "Σ size (WSOL) of live pool Calls: what the pool receives if they are exercised."
+            ],
+            "type": "u64"
           }
         ]
       }
