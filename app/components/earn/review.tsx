@@ -109,9 +109,19 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
       : null;
   const lendNote = apy ? `${(apy.bps / 100).toFixed(2)}% APY · ≈ $0 on devnet — no borrowers` : "≈ $0 on devnet — no borrowers";
 
-  const balanceShort =
-    publicKey &&
-    (draft.lockIsUsdc ? usdcBal !== null && usdcBal < lockWhole : solBal !== null && solBal < lockWhole + 0.01);
+  // The program moves principal + a 10-base-unit Lend dust buffer, so buys need 0.01 USDC headroom; sells keep a SOL
+  // margin for rent/fees (A-M2).
+  const BALANCE_BUFFER = 0.01;
+  const needWhole = lockWhole + BALANCE_BUFFER;
+  const haveWhole = draft.lockIsUsdc ? usdcBal : solBal;
+  const shortfall = publicKey && haveWhole !== null && haveWhole < needWhole ? needWhole - haveWhole : null;
+  const balanceShort = shortfall !== null;
+  const shortfallText =
+    shortfall === null
+      ? ""
+      : draft.lockIsUsdc
+        ? `${(Math.ceil(shortfall * 100) / 100).toFixed(2)} USDC`
+        : `${fmtSize(Math.ceil(shortfall * 1e4) / 1e4)} ${asset.symbol}`;
   const program = useProgram();
   const client = program.status === "ready" ? program.client : null;
 
@@ -321,7 +331,8 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
                 </Button>
                 {balanceShort && (
                   <p className="text-sm text-destructive">
-                    You have {draft.lockIsUsdc ? `${fmtPrice(usdcBal ?? 0)} USDC` : `${fmtSize(solBal ?? 0)} SOL`} — not enough for this plan.
+                    You have {draft.lockIsUsdc ? `${fmtPrice(usdcBal ?? 0)} USDC` : `${fmtSize(solBal ?? 0)} SOL`} — you need{" "}
+                    {shortfallText} more ({draft.lockIsUsdc ? `${fmtPrice(lockWhole)} + 0.01 USDC buffer` : `${fmtSize(lockWhole)} + 0.01 SOL for fees`}).
                   </p>
                 )}
               </div>
