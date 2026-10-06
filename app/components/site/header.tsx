@@ -14,8 +14,6 @@ const NAV = [
   { href: "/plans", label: "My plans" },
   { href: "/desk", label: "Desk" },
   { href: "/auctions", label: "Auctions" },
-  { href: "/maker", label: "Maker" },
-  { href: "/pool", label: "Pool" },
 ];
 
 export function Wordmark({ className }: { className?: string }) {

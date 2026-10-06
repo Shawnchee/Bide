@@ -68,10 +68,7 @@ export function DeskFeed() {
           <p className={cn("num mt-1.5 text-4xl leading-none font-semibold tracking-tight", runs.status === "ready" && rejections > 0 && "text-destructive")}>
             {runs.status === "ready" ? rejections : "—"}
           </p>
-          <p className="mt-2 text-xs text-muted-foreground">
-            in the last {WINDOW_H} h. The AI is allowed to try; the Solana program decides. The prompt doesn&apos;t forbid out-of-bounds
-            proposals and Risk is given no plan bounds directly. Only landed transactions the program rejected count here; missed windows and skipped sends are listed separately.
-          </p>
+          <p className="mt-2 text-xs text-muted-foreground">in the last {WINDOW_H} h. The AI may try; the program decides.</p>
         </div>
         <div className="grid content-center gap-2 bg-card p-4 text-[13px] sm:p-5">
           <p className="flex items-center gap-2">
@@ -92,7 +89,7 @@ export function DeskFeed() {
             ["all", "All"],
             ["rejected", "Rejected"],
             ["opened", "Opened"],
-            ["held", "Skipped / vetoed"],
+            ["held", "Skipped"],
           ] as [Filter, string][]
         ).map(([id, label]) => (
           <Button
@@ -109,7 +106,7 @@ export function DeskFeed() {
       </div>
 
       {runs.status === "unconfigured" ? (
-        <EmptyState title="Data feed not configured">The desk writes every run to the data feed. Connect it to see the live history.</EmptyState>
+        <EmptyState title="Data feed not configured">Connect the data feed to see live runs.</EmptyState>
       ) : runs.status === "loading" ? (
         <div className="grid gap-2">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -122,7 +119,7 @@ export function DeskFeed() {
         </EmptyState>
       ) : shown.length === 0 ? (
         <EmptyState title={filter === "all" ? "No desk runs yet" : "Nothing in this filter yet"}>
-          The desk runs whenever a plan is inside an auction window. New runs appear here live.
+          New runs appear here live.
         </EmptyState>
       ) : (
         <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">

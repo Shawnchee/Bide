@@ -10,13 +10,13 @@ export function HowItWorks() {
     <Sheet>
       <SheetTrigger asChild>
         <Button variant="ghost" className="-ml-3 h-10 gap-2 text-sm">
-          <BookOpen className="size-4" aria-hidden /> How it works under the hood
+          <BookOpen className="size-4" aria-hidden /> How it works
         </Button>
       </SheetTrigger>
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle className="font-display text-xl">Under the hood</SheetTitle>
-          <SheetDescription>For the curious. You don&apos;t need any of this to use Bide.</SheetDescription>
+          <SheetTitle className="font-display text-xl">How it works</SheetTitle>
+          <SheetDescription>Optional reading.</SheetDescription>
         </SheetHeader>
         <div className="grid gap-6 px-4 pb-8 text-sm leading-relaxed">
           <section className="grid gap-2">

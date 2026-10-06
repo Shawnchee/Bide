@@ -272,7 +272,7 @@ const money = (n: number) => `$${cents(n).toLocaleString("en-US", { minimumFract
 export function payoff(p: PayoffInput, symbol: string): PayoffResult {
   const earned = cents((p.premiumNet ?? 0) + (p.lendYield ?? 0));
   const earnedRow: PayoffRow[] = earned > 0 ? [{ label: "Earned (upfront pay + interest est.)", value: earned }] : [];
-  const keepEarned = earned > 0 ? ` You also keep the ${money(earned)} you earned.` : " You also keep what you were paid.";
+  const keepEarned = earned > 0 ? ` You keep the ${money(earned)} earned.` : " You keep the pay.";
   const done = (filled: boolean, headline: string, detail: string, rows: PayoffRow[], holdValue: number): PayoffResult => ({
     filled,
     headline,
@@ -293,7 +293,7 @@ export function payoff(p: PayoffInput, symbol: string): PayoffResult {
         true,
         `You sell ${fmtSize(p.size)} ${symbol} at $${fmtPrice(p.strike)}`,
         laddered
-          ? `You sell ${fmtSize(p.size)} ${symbol} at $${fmtPrice(p.strike)} for ${money(got)}; ${fmtSize(waiting)} ${symbol} keeps waiting in Jupiter Lend for the next rounds.${keepEarned}`
+          ? `You get ${money(got)}; ${fmtSize(waiting)} ${symbol} waits for later rounds.${keepEarned}`
           : `You receive ${money(got)} USDC.${keepEarned}`,
         [
           { label: "USDC from the sale", value: got },
@@ -306,8 +306,7 @@ export function payoff(p: PayoffInput, symbol: string): PayoffResult {
     return done(
       false,
       `Nothing is sold — your ${fmtSize(lock)} ${symbol} stays in Jupiter Lend`,
-      (laddered ? `This round offers ${fmtSize(p.size)} of your ${fmtSize(lock)} ${symbol} (the desk ladders in). ` : "") +
-        `Nothing is sold, so you keep all your ${symbol}.${keepEarned} The next round starts automatically.`,
+      `You keep all your ${symbol}.${keepEarned} Next round starts automatically.`,
       [{ label: `Your ${symbol}`, amount: `${fmtSize(lock)} ${symbol}`, value: cents(lock * p.settle) }, ...earnedRow],
       holdValue,
     );
@@ -317,14 +316,13 @@ export function payoff(p: PayoffInput, symbol: string): PayoffResult {
   const lock = Math.max(p.lockTotal, cost);
   const waiting = cents(Math.max(0, lock - cost));
   const laddered = waiting >= 0.01;
-  const uses = laddered ? `This round uses ${money(cost)} of your ${money(lock)} (the desk ladders in). ` : "";
   if (p.settle < p.strike) {
     const crash = p.settle < p.strike * 0.85 ? ` Even though ${symbol} is at $${fmtPrice(p.settle)}, you pay your price.` : "";
     return done(
       true,
       `You buy ${fmtSize(p.size)} ${symbol} at $${fmtPrice(p.strike)}`,
       laddered
-        ? `You buy ${fmtSize(p.size)} ${symbol} at $${fmtPrice(p.strike)} with ${money(cost)}; ${money(waiting)} keeps waiting in Jupiter Lend for the next rounds.${crash}${keepEarned}`
+        ? `You pay ${money(cost)}; ${money(waiting)} waits for later rounds.${crash}${keepEarned}`
         : `You pay ${money(cost)}.${crash}${keepEarned}`,
       [
         { label: `${symbol} you bought`, amount: `${fmtSize(p.size)} ${symbol}`, value: cents(p.size * p.settle) },
@@ -337,7 +335,7 @@ export function payoff(p: PayoffInput, symbol: string): PayoffResult {
   return done(
     false,
     `Nothing is bought — your ${money(lock)} stays in Jupiter Lend`,
-    `${uses}Nothing is bought this round, so your ${money(lock)} stays in Jupiter Lend.${keepEarned} The next round starts automatically.`,
+    `${keepEarned.trim()} Next round starts automatically.`,
     [{ label: "Your USDC", value: lock }, ...earnedRow],
     lock,
   );

@@ -83,14 +83,14 @@ export function IntakeBox({ onApply }: { onApply: (f: IntakeFields) => void }) {
       </Label>
       <textarea
         id="intake-text"
-        rows={3}
+        rows={2}
         maxLength={600}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit();
         }}
-        placeholder="e.g. I'd like to buy about $300 of SOL if it drops to $110 in the next month"
+        placeholder="e.g. Buy $300 of SOL if it drops to $110 this month"
         className="w-full resize-y rounded-xl border border-transparent bg-secondary px-3.5 py-3 text-base transition-colors duration-150 outline-none placeholder:text-muted-foreground focus-visible:border-input focus-visible:ring-2 focus-visible:ring-ring/40 md:text-sm"
       />
       <div className="flex flex-wrap items-center gap-3">
@@ -99,8 +99,8 @@ export function IntakeBox({ onApply }: { onApply: (f: IntakeFields) => void }) {
         </Button>
         <p className="text-xs text-muted-foreground" aria-live="polite">
           {state.s === "running"
-            ? "The assistant thinks carefully — usually under a minute."
-            : "It only fills the form. You review everything before you sign."}
+            ? "Usually under a minute."
+            : "Fills the form. You review before signing."}
         </p>
       </div>
       {state.s === "error" && (
@@ -113,7 +113,7 @@ export function IntakeBox({ onApply }: { onApply: (f: IntakeFields) => void }) {
           <button type="button" aria-label="Dismiss" onClick={() => setState({ s: "idle" })} className="absolute top-1 right-1 grid size-9 place-items-center rounded-full text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
             <X className="size-4" aria-hidden />
           </button>
-          <p className="font-medium">{state.filled ? `Filled ${state.filled} ${state.filled === 1 ? "answer" : "answers"} below. Check each one.` : "I couldn't fill anything — please use the form."}</p>
+          <p className="font-medium">{state.filled ? `Filled ${state.filled} ${state.filled === 1 ? "answer" : "answers"}. Check each one.` : "Couldn't fill anything. Use the form."}</p>
           {state.assumptions.length > 0 && (
             <div>
               <p className="text-muted-foreground">I assumed:</p>
@@ -126,7 +126,7 @@ export function IntakeBox({ onApply }: { onApply: (f: IntakeFields) => void }) {
           )}
           {state.questions.length > 0 && (
             <div>
-              <p className="text-muted-foreground">Still to decide (left empty below):</p>
+              <p className="text-muted-foreground">Still to decide:</p>
               <ul className="mt-1 list-disc pl-5">
                 {state.questions.map((q) => (
                   <li key={q}>{q}</li>

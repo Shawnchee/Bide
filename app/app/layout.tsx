@@ -25,11 +25,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <main className="flex-1">{children}</main>
           <footer className="border-t border-border">
             <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
-              <p>Bide runs on Solana devnet. Unaudited hackathon software — test tokens only.</p>
+              <p>Solana devnet. Unaudited — test tokens only.</p>
               <nav aria-label="Footer" className="flex gap-4">
-                <Link href="/desk" className="hover:text-foreground">Desk</Link>
-                <Link href="/auctions" className="hover:text-foreground">Auctions</Link>
-                <Link href="/pool" className="hover:text-foreground">Pool</Link>
+                <Link href="/maker" className="py-2 hover:text-foreground">For market makers</Link>
+                <Link href="/pool" className="py-2 hover:text-foreground">Backstop pool</Link>
               </nav>
             </div>
           </footer>

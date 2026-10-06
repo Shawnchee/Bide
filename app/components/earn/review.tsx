@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { AlertTriangle, ArrowLeft, Check, CircleDashed, Loader2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -132,151 +132,96 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
     }
   };
 
+  const steps = data ? collapseSteps(data.steps) : [];
+  const priced = state.status === "done" && finalStatus === "open" && floorNet !== null;
+  const crash = buy ? Math.round(strike * 0.7) : Math.round(strike * 1.4);
+  const lockAsset = buy ? "USDC" : asset.symbol;
+
   return (
     <div className="grid gap-6">
       <div>
         <Button variant="ghost" className="-ml-3 h-10 gap-2 text-muted-foreground" onClick={onBack}>
           <ArrowLeft className="size-4" aria-hidden /> Edit plan
         </Button>
-        <p className="mt-3 text-xs font-medium text-primary">Review</p>
-        <h1 className="mt-1 font-display text-2xl leading-tight text-balance sm:text-[28px]">{sentence}</h1>
-        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          If it hasn&apos;t filled by {dateShort(horizonEnd)}, your {buy ? "USDC" : asset.symbol} comes back automatically with everything
-          you earned.
+        <p className="mt-3 text-sm text-muted-foreground">{sentence}</p>
+        <h1 className="mt-1 font-display text-3xl leading-tight text-balance sm:text-[40px]" aria-live="polite">
+          {priced ? (
+            <>
+              You get{" "}
+              <span className="num whitespace-nowrap text-primary">
+                {usd(floorNet!)}
+                {startNet && startNet > floorNet! + 0.005 && <>–{usd(startNet)}</>}
+              </span>{" "}
+              now
+            </>
+          ) : state.status === "running" ? (
+            "Pricing your first round…"
+          ) : finalStatus === "skip" ? (
+            "The desk would wait for now"
+          ) : finalStatus === "vetoed" ? (
+            "Risk would hold off this cycle"
+          ) : (
+            "Your plan is ready"
+          )}
+        </h1>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          {priced
+            ? `Paid upfront for round one, after Bide's ${feeBps / 100}% fee.${draft.args.quick ? " Quick-plan pricing." : ""}`
+            : finalStatus === "skip" || finalStatus === "vetoed"
+              ? (data?.final?.reason ?? "Your funds earn Jupiter Lend interest meanwhile.")
+              : state.status === "running"
+                ? "The AI desk checks live markets. About a minute."
+                : "The desk prices each round when it opens."}
         </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="grid min-w-0 gap-4">
-          {/* Desk */}
-          <section aria-labelledby="desk-h" className="rounded-2xl border border-border bg-card p-4 sm:p-5">
-            <div className="flex items-center justify-between gap-4">
-              <h2 id="desk-h" className="text-sm font-semibold">
-                {state.status === "running" ? "The desk is pricing your first round…" : "What the desk would do first"}
-              </h2>
-              {data?.memoHash && <span className="truncate font-mono text-[11px] text-muted-foreground">memo {data.memoHash.slice(0, 10)}…</span>}
-            </div>
-            {state.status === "error" && (
-              <div className="mt-4 flex items-start gap-3 rounded-xl bg-warning-soft p-4 text-sm text-warning-foreground" role="alert">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-                <p className="min-w-0 flex-1">{state.message}</p>
-                <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 rounded-full" onClick={retry}>
-                  Retry
-                </Button>
-              </div>
-            )}
-            {data && data.steps.length > 0 && (
-              <ol className="mt-4 grid gap-2" aria-live="polite">
-                {collapseSteps(data.steps).map((s, i, arr) => {
-                    const last = i === arr.length - 1 && state.status === "running";
-                    return (
-                      <li key={s.key} className="flex items-start gap-2.5 text-sm animate-in fade-in-0 slide-in-from-bottom-1 duration-300">
-                        {last ? (
-                          <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
-                        ) : (
-                          <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-                        )}
-                        <span className={last ? "text-foreground" : "text-muted-foreground"}>{s.label}</span>
-                      </li>
-                    );
-                  })}
-              </ol>
-            )}
-            {state.status === "running" && (!data || data.steps.length === 0) && (
-              <div className="mt-4 grid gap-2">
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-4 w-1/2" />
-                <Skeleton className="h-4 w-3/5" />
-              </div>
-            )}
-            {state.status === "done" && data?.status === "error" && !data.final && (
-              <div className="mt-4 flex items-start gap-3 rounded-xl bg-warning-soft p-4 text-sm text-warning-foreground">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-                <p className="min-w-0 flex-1">The desk couldn&apos;t price this right now. You can still start the plan — the desk prices each round when it opens.</p>
-                <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 rounded-full" onClick={retry}>
-                  Retry
-                </Button>
-              </div>
-            )}
-            {state.status === "done" && data?.final && (
-              <div className="mt-4 grid gap-3 border-t border-border pt-4">
-                {finalStatus === "open" && floorNet !== null ? (
-                  <>
-                    <p className="text-xl leading-snug font-semibold tracking-tight">
-                      You&apos;d get <span className="num font-medium text-primary">{usd(floorNet)}</span>
-                      {startNet && startNet > floorNet + 0.005 && (
-                        <>
-                          {" "}
-                          to <span className="num font-medium text-primary">{usd(startNet)}</span>
-                        </>
-                      )}{" "}
-                      upfront for the first round.
-                    </p>
-                    <ul className="grid gap-1 text-[13px] text-muted-foreground">
-                      {roundSize !== null && (
-                        <li>
-                          First round: {fmtSize(roundSize)} {asset.symbol}
-                          {roundSize < sizeTotal ? ` of ${fmtSize(sizeTotal)} (the desk ladders into your goal)` : ""}, checked {checkText}.
-                        </li>
-                      )}
-                      {prob !== null && <li>Chance this round fills: about {Math.round(prob * 100)}% (from exchange option prices).</li>}
-                      {risk && <li>Risk check: {risk}.</li>}
-                      <li>All figures are after Bide&apos;s {feeBps / 100}% fee. The final amount is set by the auction.</li>
-                      {draft.args.quick && <li>Quick-plan pricing: priced with the nearest listed exchange option.</li>}
-                    </ul>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {finalStatus === "skip"
-                      ? `The desk would wait for now: ${data?.final?.reason ?? "conditions aren't good enough yet"}. Your funds earn Jupiter Lend interest until the next window.`
-                      : finalStatus === "vetoed"
-                        ? `Risk would hold off this cycle: ${data?.final?.reason ?? ""}. Your funds wait in Jupiter Lend.`
-                        : data?.final?.reason ?? "No round proposed right now."}
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
-
-          {/* Scenarios */}
-          <section aria-labelledby="sc-h" className="grid gap-3">
-            <h2 id="sc-h" className="text-sm font-semibold">
-              What can happen{checkAt ? ` on ${dateShort(checkAt)}` : " each round"}
-            </h2>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-border bg-card p-4">
-                <p className="text-xs font-semibold text-primary">It fills</p>
-                <p className="mt-1.5 text-sm leading-relaxed">
-                  If {asset.symbol} is {buy ? "below" : "above"} <span className="num">${fmtPrice(strike)}</span> at the check, you{" "}
-                  {buy ? "buy" : "sell"} {fmtSize(roundSize ?? sizeTotal)} {asset.symbol} at exactly{" "}
-                  <span className="num">${fmtPrice(strike)}</span>. You keep {floorNet !== null ? usd(floorNet) : "what you were paid"}.
-                </p>
-              </div>
-              <div className="rounded-2xl border border-border bg-card p-4">
-                <p className="text-xs font-semibold text-muted-foreground">It doesn&apos;t fill</p>
-                <p className="mt-1.5 text-sm leading-relaxed">
-                  Otherwise you keep your {buy ? "USDC" : asset.symbol}, keep {floorNet !== null ? usd(floorNet) : "what you were paid"}, and earn
-                  Jupiter Lend interest. Then the next round starts automatically — you can stop anytime between rounds.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 rounded-2xl border border-warning/40 bg-warning-soft p-4 text-warning-foreground">
+          {state.status === "error" && (
+            <div className="flex items-start gap-3 rounded-2xl bg-warning-soft p-4 text-sm text-warning-foreground" role="alert">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-              <div className="grid gap-1.5 text-[13px] leading-relaxed">
-                <p className="font-medium">Checked once, at {checkText} — not the moment the price touches ${fmtPrice(strike)}.</p>
-                {buy ? (
-                  <p>
-                    If {asset.symbol} dips to ${fmtPrice(Math.round(strike * 0.95))} mid-round and is back at ${fmtPrice(Math.round(strike * 1.05))} at the check, you
-                    don&apos;t buy (you keep what you were paid). If {asset.symbol} crashes to ${fmtPrice(Math.round(strike * 0.7))}, you still buy at $
-                    {fmtPrice(strike)}.
-                  </p>
-                ) : (
-                  <p>
-                    If {asset.symbol} spikes to ${fmtPrice(Math.round(strike * 1.05))} mid-round and is back at ${fmtPrice(Math.round(strike * 0.95))} at the check, you
-                    don&apos;t sell. If {asset.symbol} rockets to ${fmtPrice(Math.round(strike * 1.4))}, you still sell at ${fmtPrice(strike)}.
-                  </p>
-                )}
-                <p>Same price as a limit order, different trigger.</p>
+              <p className="min-w-0 flex-1">{state.message}</p>
+              <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 rounded-full" onClick={retry}>
+                Retry
+              </Button>
+            </div>
+          )}
+          {state.status === "done" && data?.status === "error" && !data.final && (
+            <div className="flex items-start gap-3 rounded-2xl bg-warning-soft p-4 text-sm text-warning-foreground">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <p className="min-w-0 flex-1">Couldn&apos;t price this now. You can still start the plan.</p>
+              <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 rounded-full" onClick={retry}>
+                Retry
+              </Button>
+            </div>
+          )}
+
+          {/* Outcomes */}
+          <section aria-labelledby="sc-h" className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+            <h2 id="sc-h" className="text-sm font-semibold">
+              At the check{checkAt ? `, ${dateShort(checkAt)}` : ""}
+            </h2>
+            <dl className="mt-3 grid gap-2 text-sm">
+              <div className="grid grid-cols-[5.5rem_1fr] gap-3">
+                <dt className="font-semibold text-primary">It fills</dt>
+                <dd>
+                  {asset.symbol} {buy ? "below" : "above"} <span className="num">${fmtPrice(strike)}</span>: you {buy ? "buy" : "sell"}{" "}
+                  <span className="num">{fmtSize(roundSize ?? sizeTotal)}</span> {asset.symbol} at <span className="num">${fmtPrice(strike)}</span>.
+                </dd>
+              </div>
+              <div className="grid grid-cols-[5.5rem_1fr] gap-3">
+                <dt className="font-semibold text-muted-foreground">It doesn&apos;t</dt>
+                <dd>You keep your {lockAsset}. Next round starts, until {dateShort(horizonEnd)}.</dd>
+              </div>
+            </dl>
+            <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-warning-soft p-3 text-[13px] text-warning-foreground">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <div className="grid gap-0.5">
+                <p className="font-medium">Checked once at {checkText}, not on touch.</p>
+                <p>
+                  If {asset.symbol} {buy ? "crashes" : "rockets"} to <span className="num">${fmtPrice(crash)}</span>, you still {buy ? "buy" : "sell"} at{" "}
+                  <span className="num">${fmtPrice(strike)}</span>. You keep the pay either way.
+                </p>
               </div>
             </div>
           </section>
@@ -293,6 +238,55 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
             checkAt={checkAt}
             spot={spot}
           />
+
+          {/* Desk: collapsed by default */}
+          {(steps.length > 0 || state.status === "running") && (
+            <details className="group rounded-2xl border border-border bg-card">
+              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 rounded-2xl px-4 text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:px-5 [&::-webkit-details-marker]:hidden">
+                <span className="flex items-center gap-2">
+                  {state.status === "running" && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />}
+                  {state.status === "running" ? "The AI is checking" : "See what the AI checked"}
+                  {steps.length > 0 && <span className="num text-muted-foreground">({steps.length} steps)</span>}
+                </span>
+                <ChevronDown className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" aria-hidden />
+              </summary>
+              <div className="border-t border-border px-4 py-4 sm:px-5">
+                {steps.length > 0 ? (
+                  <ol className="grid gap-2">
+                    {steps.map((s, i, arr) => {
+                      const last = i === arr.length - 1 && state.status === "running";
+                      return (
+                        <li key={s.key} className="flex items-start gap-2.5 text-sm">
+                          {last ? (
+                            <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+                          ) : (
+                            <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+                          )}
+                          <span className={last ? "text-foreground" : "text-muted-foreground"}>{s.label}</span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                ) : (
+                  <div className="grid gap-2">
+                    <Skeleton className="h-4 w-2/3" />
+                    <Skeleton className="h-4 w-1/2" />
+                  </div>
+                )}
+              </div>
+            </details>
+          )}
+          {(data?.memoHash || risk || prob !== null) && (
+            <p className="truncate text-xs text-muted-foreground">
+              {[
+                data?.memoHash && `memo ${data.memoHash.slice(0, 10)}…`,
+                risk && `Clef ${risk}`,
+                prob !== null && `~${Math.round(prob * 100)}% fill chance`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
         </div>
 
         {/* Commit */}
@@ -301,20 +295,9 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
             <div className="swap-panel">
               <p className="text-xs font-medium text-muted-foreground">You set aside</p>
               <p className="num mt-1 text-[26px] leading-tight font-semibold tracking-tight">{lockLabel}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Goes into Jupiter Lend and earns interest. {goal === "sell" ? "Your SOL is wrapped automatically in the same signature." : ""}
-              </p>
+              <p className="mt-1 text-xs text-muted-foreground">Earns Jupiter Lend interest while it waits.</p>
             </div>
-            <ul className="grid gap-2 px-1 text-[13px]">
-              <li className="flex gap-2">
-                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-                Your price, deadline and minimum pay are enforced by the Solana program.
-              </li>
-              <li className="flex gap-2">
-                <CircleDashed className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-                One signature. Stop anytime between rounds.
-              </li>
-            </ul>
+            <p className="px-1 text-[13px] text-muted-foreground">Limits enforced on-chain. Stop anytime between rounds.</p>
             {!publicKey ? (
               <WalletButton size="lg" className="h-12 w-full rounded-xl text-base" />
             ) : !client ? (

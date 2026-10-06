@@ -44,7 +44,7 @@ export function AuctionTape() {
       <table className="data-table min-w-[60rem]">
         <thead>
           <tr>
-            {["Opened", "Round", "Start", "Floor", "Paid by maker (gross)", "Plan owner got (after 10% fee)", "Winner", "Fee", "Status"].map((h, i) => (
+            {["Opened", "Round", "Start", "Floor", "Maker paid", "Owner got (after fee)", "Winner", "Fee", "Status"].map((h, i) => (
               <th key={h} scope="col" className={[2, 3, 4, 5, 7].includes(i) ? "text-right" : undefined}>
                 {h}
               </th>

@@ -61,7 +61,7 @@ export function TrackRecord() {
   const s = stats(rounds.rows);
   const cells: [string, string, string?][] = [
     ["Fill rate", pctS(s.fillRate), `${s.finished} finished auctions`],
-    ["Paid ÷ start price", s.fillOverStart === null ? "—" : s.fillOverStart.toFixed(2), "how far the price fell before a taker"],
+    ["Paid ÷ start price", s.fillOverStart === null ? "—" : s.fillOverStart.toFixed(2), "how far the price fell"],
     ["Median time to fill", s.medianSecs === null ? "—" : `${s.medianSecs} s`, "from auction start"],
     ["Untaken", String(s.untaken), "auctions nobody took"],
     ["Filled at expiry", pctS(s.exerciseRate), `${s.resolved} settled rounds`],
@@ -72,14 +72,10 @@ export function TrackRecord() {
         <h2 id="track-h" className="text-sm font-semibold">
           What the desk learned
         </h2>
-        <p className="max-w-3xl text-xs text-muted-foreground">
-          Before each round the desk reads these statistics from the last {N} rounds (per plan and per asset) and must cite them in its
-          reasoning. They can shape auction length, expiry, size or a skip — never your limits or your price. Computed by code, not by a
-          model; with few rounds so far, treat them as thin evidence. Quick rounds are mostly taken by Bide&apos;s own makers.
-        </p>
+        <p className="max-w-3xl text-xs text-muted-foreground">Last {N} rounds. The desk must cite these; they never change your limits.</p>
       </div>
       {rounds.rows.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-border p-5 text-sm text-muted-foreground">No finished rounds yet — the statistics appear after the first auction.</p>
+        <p className="rounded-2xl border border-dashed border-border p-5 text-sm text-muted-foreground">No finished rounds yet.</p>
       ) : (
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-5">
           {cells.map(([label, value, sub]) => (

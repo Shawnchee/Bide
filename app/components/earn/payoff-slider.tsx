@@ -35,7 +35,7 @@ export function PayoffSlider({ goal, symbol, strike, size, lockTotal, premiumNet
       <h2 id="payoff-h" className="text-sm font-semibold">
         Try a price
       </h2>
-      <p className="mt-0.5 text-xs text-muted-foreground">Drag to see where your whole plan stands after this round&apos;s check.</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">Drag to test where the price ends.</p>
 
       <div className="mt-4 grid gap-3 rounded-xl bg-secondary p-4">
         <p className="text-[15px]">
@@ -96,7 +96,7 @@ export function PayoffSlider({ goal, symbol, strike, size, lockTotal, premiumNet
         </div>
       </dl>
       {premiumNet === null && (
-        <p className="mt-3 text-xs text-muted-foreground">Upfront pay isn&apos;t included until the desk prices the round.</p>
+        <p className="mt-3 text-xs text-muted-foreground">Upfront pay is added once the desk prices the round.</p>
       )}
     </section>
   );

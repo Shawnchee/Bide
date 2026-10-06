@@ -38,11 +38,7 @@ export function LiveExample() {
         <Skeleton className="mt-2 h-16 w-full" />
       )}
       </div>
-      <ul className="grid gap-1.5 px-2 py-2 text-[13px] text-muted-foreground">
-        <li>Paid upfront each round, filled or not.</li>
-        <li>Your USDC earns Jupiter Lend interest meanwhile.</li>
-        <li>Fills at exactly your price — checked once at each round&apos;s end.</li>
-      </ul>
+      <p className="px-2 py-2 text-[13px] text-muted-foreground">Paid each round, plus Jupiter Lend interest.</p>
       <Link
         href="/earn"
         className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 text-[15px] font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none active:translate-y-px"

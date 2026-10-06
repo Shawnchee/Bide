@@ -41,7 +41,7 @@ export function MakerLedger() {
               {t.settled ? `${t.pnl >= 0n ? "+" : ""}${usdc(t.pnl)}` : "—"}
             </p>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              cumulative P&amp;L over {t.settled} settled {t.settled === 1 ? "round" : "rounds"} (settlement value − premium paid)
+              P&amp;L over {t.settled} settled {t.settled === 1 ? "round" : "rounds"}
             </p>
           </div>
           <dl className="num grid grid-cols-3 gap-2 border-t border-border pt-3 text-[13px] font-medium [&_dt]:text-xs [&_dt]:font-normal">
