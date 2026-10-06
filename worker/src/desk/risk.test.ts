@@ -144,3 +144,25 @@ test("risk state scrubs plan bounds the Quant repeated in its rationale", () => 
   const clean = buildRiskState({ proposal: { ...proposal, rationale: "Fill probability is 0.62." }, traces, asset: "SOL", asset_decimals: 9, round_kind: "put", patience: "balanced", now_ms: NOW_MS });
   assert.equal((clean as any).proposal.rationale, "Fill probability is 0.62.");
 });
+
+test("risk scrub redacts the user-minimum leaks seen live on 6 Oct in place (keeps the premium numbers)", () => {
+  const traces: ToolTrace[] = [{ call_id: "1", name: "get_plan", args: {}, ok: true, result: fixturePlan({ min_premium_bps_per_day: 10 }), started_at: 0, duration_ms: 0, attempt: 0 }];
+  const proposal = { action: "open" as const, strike: "120600000", size: "100000000", expiry: EXP.w3, auction_secs: 30, premium_start: "2149", premium_floor: "1226",
+    rationale: "Price_grid gives premium_start 2149 and premium_floor 1226 vs user_min_floor 90 (floor_over_user_min 13.6x), from 4 venues. The floor 1226 clears the user's minimum comfortably. It beats the user minimum floor of 48 by far, and the user's 53-unit minimum too, and the user's 103 minimum by 34x. Fill probability is 0.62." };
+  const r = (buildRiskState({ proposal, traces, asset: "SOL", asset_decimals: 9, round_kind: "call", patience: "balanced", now_ms: NOW_MS }) as any).proposal.rationale as string;
+  assert.ok(!/minimum|user_min|over_user|\b90\b|\b48\b|\b53\b|\b103\b|13\.6/i.test(r), `leak: ${r}`);
+  assert.ok(r.includes("premium_start 2149 and premium_floor 1226") && r.includes("Fill probability is 0.62."), r);
+  assert.match(r, /plan-bound references removed/);
+});
+
+test("risk scrub: a rationale where every sentence names a bound is redacted in place, not withheld", () => {
+  const plan = fixturePlan({ strike_min: "104000000", strike_max: "110000000", min_premium_bps_per_day: 17, max_expiry_secs: 1234567, horizon_end: 1799999999 });
+  const traces: ToolTrace[] = [{ call_id: "1", name: "get_plan", args: {}, ok: true, result: { ...plan, strike_min_usd: "$104.00" }, started_at: 0, duration_ms: 0, attempt: 0 }];
+  const proposal = { action: "open" as const, strike: "110000000", size: "1500000000", expiry: EXP.w3, auction_secs: 30, premium_start: "9100000", premium_floor: "5400000",
+    rationale: "Premium_floor 5400000 clears the minimum yield of 17 bps with fill probability 0.62, inside the strike range $104 to $110." };
+  const r = (buildRiskState({ proposal, traces, asset: "SOL", asset_decimals: 9, round_kind: "put", patience: "balanced", now_ms: NOW_MS }) as any).proposal.rationale as string;
+  assert.ok(!r.includes("withheld"), r);
+  assert.ok(r.includes("5400000") && r.includes("0.62"), r);
+  assert.ok(!/\b104\b|\b17\b|strike range|minimum yield/i.test(r), `leak: ${r}`);
+  assert.match(r, /plan-bound references redacted/);
+});

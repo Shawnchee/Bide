@@ -87,8 +87,12 @@ export function buildRiskState(i: RiskStateInput): Record<string, unknown> {
   };
 }
 
+/** BOUND_WORDS, global (in-place redaction). */
+const boundWordsG = () => new RegExp(BOUND_WORDS.source, "gi");
 /** Plan-bound keys in get_plan output (strike range, target, minimum yield, deadline, limits, remaining size). */
 const BOUND_KEY = /(min|max|target|deadline|horizon|limit|bound|range|remaining|goal|user_price|lock|exit)/i;
+/** User-minimum phrases redacted in place (with the number that follows them, if any). */
+const USER_LIMIT_INLINE = /\b(?:(?:vs\.? |against |versus )?(?:an? |the )?user'?s?[ _-]?(?:\$?\d[\d,.]*(?:[ -]?(?:unit|base[ -]unit|bps)s?)? )?min(?:imum)?\w*(?: (?:acceptable )?(?:floor|yield|premium|pay))?(?: of)?(?: [=:]?\s?\$?\d[\d,.]*x?(?: (?:USDC )?(?:base units|units|bps(?:\/day)?))?)?|\w*over_user_min\w*(?:\s?[=:]?\s?\d[\d,.]*x?)?)/gi;
 /** Words that only make sense when the sentence talks about the user's limits. */
 const BOUND_WORDS = /\b(target(ed)? (price|strike)|strike (range|band|bounds?|min|max)|min(imum)?[ _-]?(yield|premium|pay|bps)|max(imum)?[ _-]?(expiry|rounds?)|deadline|horizon|user'?s? (min|max|limit|bound|target|price)|plan (bounds?|limits?)|within (the )?(bounds?|limits?|range)|(upper|lower) bound|rate limit)\b/i;
 
@@ -127,12 +131,22 @@ export function scrubRationale(rationale: string | null | undefined, traces: Too
     if (p?.strike && v === p.strike) { const usdN = Number(v) / 1e6; keep.add(String(usdN)); keep.add(usdN.toFixed(2)); }
   }
   const tokens = boundTokens(traces, keep);
-  const sentences = rationale.split(/(?<=[.!?])\s+/);
+  // Inline-redact the user's-minimum phrasings first (live 6 Oct: "clearing the user's minimum", "vs user_min_floor 90
+  // (floor_over_user_min 13.6x)", "the user's 53-unit minimum"). Redacting in place instead of dropping the sentence keeps
+  // the premium numbers Risk checks: rationales withheld whole were vetoed "explanation_ok: no" ~2/3 of the time.
+  const inlined = rationale.replace(USER_LIMIT_INLINE, "[redacted]");
+  const sentences = inlined.split(/(?<=[.!?])\s+/);
   const kept = sentences.filter((sen) => {
     if (BOUND_WORDS.test(sen)) return false;
     const nums = (sen.match(/\d[\d,]*(\.\d+)?/g) ?? []).map((m) => m.replace(/,/g, ""));
     return !nums.some((n) => tokens.has(n) || tokens.has(String(Number(n))) || tokens.has(Number(n).toFixed(2)));
   });
-  if (kept.length === sentences.length) return rationale;
-  return kept.length ? `${kept.join(" ")} [plan-bound references removed]` : "[rationale withheld: it referenced the plan's bounds]";
+  if (kept.length === sentences.length) return inlined === rationale ? rationale : `${inlined} [plan-bound references removed]`;
+  if (kept.length) return `${kept.join(" ")} [plan-bound references removed]`;
+  // Every sentence touched a bound. Withholding the whole text made Risk's explanation_ok unanswerable: live 6 Oct, 13 of
+  // 16 withheld rationales were vetoed "rationale does not match the tool numbers" (vs 1 of 23 partly scrubbed ones).
+  // Redact the bound words and values in place instead, so the market numbers Risk checks survive.
+  const isBound = (m: string) => { const n = m.replace(/,/g, ""); return tokens.has(n) || tokens.has(String(Number(n))) || tokens.has(Number(n).toFixed(2)); };
+  const redacted = inlined.replace(boundWordsG(), "[redacted]").replace(/\d[\d,]*(\.\d+)?/g, (m) => (isBound(m) ? "[redacted]" : m));
+  return `${redacted} [plan-bound references redacted]`;
 }
