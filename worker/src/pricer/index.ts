@@ -12,7 +12,14 @@ export type { PricerAsset, VenueSnapshot } from "./types.js";
 
 const log = logger("pricer");
 
-export interface AssetState { snapshots: VenueSnapshot[]; spot?: PythPrice; refreshedAt: number }
+/** `refreshedAt` stamps the venue refresh; `spotFetchedAt` stamps the last *successful* Pyth fetch (a retained spot keeps its old stamp). */
+export interface AssetState { snapshots: VenueSnapshot[]; spot?: PythPrice; refreshedAt: number; spotFetchedAt?: number }
+
+/** Reject quotes when the Pyth spot's publishTime is older than this (W-H1). Env PRICER_MAX_SPOT_AGE_SECS, default 45. */
+export function maxSpotAgeMs(): number {
+  const n = Number(process.env.PRICER_MAX_SPOT_AGE_SECS);
+  return (Number.isFinite(n) && n > 0 ? n : 45) * 1000;
+}
 
 export class Pricer {
   private state = new Map<PricerAsset, AssetState>();
@@ -25,7 +32,12 @@ export class Pricer {
       fetchAllVenues(asset),
       getLatestPrice(FEED_IDS[asset]).catch((e) => { log.warn("pyth spot failed", { asset, err: (e as Error).message }); return undefined; }),
     ]);
-    const st: AssetState = { snapshots, spot: spot ?? this.state.get(asset)?.spot, refreshedAt: Date.now() };
+    const prev = this.state.get(asset);
+    // Never re-stamp a retained spot as fresh: keep its previous fetch stamp; quote() gates on spot.publishTime anyway.
+    const st: AssetState = spot
+      ? { snapshots, spot, refreshedAt: Date.now(), spotFetchedAt: Date.now() }
+      : { snapshots, spot: prev?.spot, refreshedAt: Date.now(), spotFetchedAt: prev?.spotFetchedAt };
+    if (!spot && st.spot) log.warn("pyth spot retained from earlier fetch", { asset, spotAgeSecs: Math.round((this.now() - st.spot.publishTime * 1000) / 1000) });
     this.state.set(asset, st);
     log.debug("refreshed", { asset, venues: snapshots.map((s) => ({ v: s.venue, n: s.quotes.length, err: s.error })), spot: st.spot?.price });
     return st;
@@ -45,6 +57,8 @@ export class Pricer {
     let st = this.state.get(asset);
     if (!st || this.now() - st.refreshedAt > 25_000) st = await this.refresh(asset);
     if (!st.spot) return { ok: false, reason: "no Pyth spot", venues: [], rejected: [] };
+    const spotAgeMs = this.now() - st.spot.publishTime * 1000;
+    if (spotAgeMs > maxSpotAgeMs()) return { ok: false, reason: `Pyth spot stale (${Math.round(spotAgeMs / 1000)} s old)`, venues: [], rejected: [] };
     return priceOption({ asset, type, strike, expiry: expiryMs, size, quick, spot: st.spot.price, now: this.now(), valuationNow: valuationNowMs }, st.snapshots);
   }
 }
