@@ -1,7 +1,6 @@
 // Hono HTTP: /health, /quotes/:asset, POST /desk/preview (shared secret). BUILD §4.4.
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { timingSafeEqual } from "node:crypto";
-import { z } from "zod";
 import { cfg, envReport } from "../config.js";
 import type { Repo } from "../db/types.js";
 import type { Desk, DeskResult } from "../desk/index.js";
@@ -13,6 +12,8 @@ import { logger } from "../log.js";
 import { rpcStats } from "../chain/rpc.js";
 import type { Pricer, PricerAsset } from "../pricer/index.js";
 import { nextFridayExpiry } from "../keeper/schedule.js";
+import { RunGate } from "../agents/queue.js";
+import { canonical, clientKey, IntakeBody, PreviewBody, PreviewCache, readHttpLimits, SlidingLimiter, type HttpLimits } from "./limits.js";
 
 const log = logger("http");
 
@@ -20,31 +21,18 @@ export interface HttpDeps {
   pricer: Pricer;
   repo: Repo;
   desk: Desk | null;
+  /** Desk wired to the low-priority (public) LLM lane; falls back to `desk` (tests). The keeper uses `desk`. */
+  previewDesk?: Desk | null;
+  /** Shared run gate for public low-lane work (previews + intake). Default: 1 in flight + limits.lowBacklog queued. */
+  gate?: RunGate;
+  limits?: Partial<HttpLimits>;
+  now?: () => number;
   deskTools: WorkerDeskTools;
   /** Intake agent (null when disabled / no Z.ai key). */
   intake?: IntakeService | null;
   loopStats: () => LoopStats[];
   status: () => Record<string, unknown>;
 }
-
-const u64 = z.string().regex(/^\d{1,20}$/);
-const PreviewBody = z.object({
-  asset: z.enum(["SOL", "BTC"]).default("SOL"),
-  side: z.enum(["buy", "sell", "wheel"]),
-  quick: z.boolean().default(false),
-  target_strike: u64,
-  exit_strike: u64.optional(),
-  lock_strike: z.boolean().default(true),
-  band: u64.optional(),
-  exit_band: u64.optional(),
-  size_total: u64,
-  min_premium_bps_per_day: z.number().int().positive(),
-  max_expiry_secs: z.number().int().positive(),
-  horizon_end: z.number().int().positive(),
-  max_rounds_per_day: z.number().int().positive().optional(),
-  owner: z.string().optional(),
-  patience: z.enum(["patient", "balanced", "eager"]).optional(),
-});
 
 export function secretOk(header: string | undefined, secret: string | undefined): boolean {
   if (!secret) return false; // fail closed when WORKER_SHARED_SECRET is EMPTY
@@ -57,6 +45,21 @@ const jsonSafe = (v: unknown) => JSON.parse(JSON.stringify(v, (_, x) => (typeof 
 
 export function buildApp(d: HttpDeps) {
   const app = new Hono();
+  const L: HttpLimits = { ...readHttpLimits(), ...d.limits };
+  const now = d.now ?? Date.now;
+  const gate = d.gate ?? new RunGate({ maxInFlight: 1, maxWaiting: L.lowBacklog, holdTimeoutMs: 180_000 });
+  const previewGlobal = new SlidingLimiter(L.previewPerMinute, 60_000, now);
+  const previewIp = new SlidingLimiter(L.previewPerIpPerMinute, 60_000, now);
+  const intakeGlobal = new SlidingLimiter(L.intakePerMinute, 60_000, now);
+  const intakeIp = new SlidingLimiter(L.intakePerIpPerMinute, 60_000, now);
+  const previewCache = new PreviewCache(L.previewCacheMs, now);
+  const busy = (c: Context, secs: number, error = "the AI desk is busy, try again shortly") => {
+    c.header("Retry-After", String(secs));
+    return c.json({ error, retry_after: secs }, 429);
+  };
+  /** Seconds to wait (0 = both budgets have room). Charge with `charge` only once every gate has passed. */
+  const budget = (ip: string, perIp: SlidingLimiter, global: SlidingLimiter): number => Math.max(perIp.check(ip), global.check());
+  const charge = (ip: string, perIp: SlidingLimiter, global: SlidingLimiter) => { perIp.hit(ip); global.hit(); };
 
   app.get("/health", (c) => {
     const loops = d.loopStats();
@@ -83,13 +86,26 @@ export function buildApp(d: HttpDeps) {
   // POST /desk/preview — returns { desk_run_id } at once; steps stream into desk_runs. ?wait=1 returns the result.
   app.post("/desk/preview", async (c) => {
     if (!secretOk(c.req.header("authorization") ?? c.req.header("x-worker-secret"), cfg.workerSharedSecret)) return c.json({ error: "unauthorized" }, 401);
-    if (!d.desk) return c.json({ error: "desk unavailable" }, 503);
-    const parsed = PreviewBody.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid body", issues: parsed.error.issues }, 400);
+    const desk = d.previewDesk ?? d.desk;
+    if (!desk) return c.json({ error: "desk unavailable" }, 503);
+    const parsed = PreviewBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "invalid body", issues: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) }, 400);
+    const cacheKey = canonical(parsed.data);
+    const cached = previewCache.get(cacheKey);
+    if (cached) return c.json({ desk_run_id: cached, cached: true }, 202);
+    const ip = clientKey(c.req.header("x-client-ip"));
+    const wait = budget(ip, previewIp, previewGlobal);
+    if (wait) return busy(c, wait);
+    const enter = gate.tryEnter();
+    if (!enter) return busy(c, 30);
+    charge(ip, previewIp, previewGlobal);
     const { patience, ...draft } = parsed.data;
     const planId = d.deskTools.registerDraft(draft);
-    const runId = await d.repo.createDeskRun({ plan_pubkey: null, kind: "preview", status: "running" });
-    const run = d.desk.runDesk({ plan_id: planId, kind: "preview", patience }, { onStep: (s) => d.repo.appendDeskStep(runId, s) })
+    let runId: string;
+    try { runId = await d.repo.createDeskRun({ plan_pubkey: null, kind: "preview", status: "running" }); }
+    catch (e) { void enter(async () => {}); throw e; }
+    previewCache.set(cacheKey, runId);
+    const run = enter(() => desk.runDesk({ plan_id: planId, kind: "preview", patience }, { onStep: (s) => d.repo.appendDeskStep(runId, s) }))
       .then(async (r: DeskResult) => {
         await d.repo.updateDeskRun(runId, {
           steps: r.steps, proposal: r.memo.quant_proposal, verdict: r.memo.clef_answers, final: r.final, memo: JSON.parse(r.memo_json),
@@ -97,7 +113,7 @@ export function buildApp(d: HttpDeps) {
         });
         return r;
       })
-      .catch(async (e) => { log.error("preview failed", { err: e }); await d.repo.updateDeskRun(runId, { status: "error", error_code: (e as Error).message.slice(0, 200) }); throw e; });
+      .catch(async (e) => { previewCache.drop(cacheKey, runId); log.error("preview failed", { err: e }); await d.repo.updateDeskRun(runId, { status: "error", error_code: (e as Error).message.slice(0, 200) }); throw e; });
     if (c.req.query("wait") === "1") {
       try {
         const r = await run;
@@ -112,14 +128,18 @@ export function buildApp(d: HttpDeps) {
   app.post("/intake", async (c) => {
     if (!secretOk(c.req.header("authorization") ?? c.req.header("x-worker-secret"), cfg.workerSharedSecret)) return c.json({ error: "unauthorized" }, 401);
     if (!d.intake) return c.json({ error: "intake unavailable" }, 503);
-    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown };
-    if (typeof body.text !== "string") return c.json({ error: "text is required" }, 400);
+    const parsed = IntakeBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "invalid body" }, 400);
+    const ip = clientKey(c.req.header("x-client-ip"));
+    const wait = budget(ip, intakeIp, intakeGlobal);
+    if (wait) return busy(c, wait, "too many requests, try again shortly");
     try {
-      const { id, done } = await d.intake.start(body.text);
+      const { id, done } = await d.intake.start(parsed.data.text);
+      charge(ip, intakeIp, intakeGlobal);
       done.catch(() => {});
       return c.json({ intake_id: id }, 202);
     } catch (e) {
-      if (e instanceof IntakeError) return c.json({ error: e.message }, e.status as 400 | 429);
+      if (e instanceof IntakeError) return e.status === 429 ? busy(c, 30, e.message) : c.json({ error: e.message }, e.status as 400);
       log.error("intake start failed", { err: e });
       return c.json({ error: "intake failed" }, 500);
     }

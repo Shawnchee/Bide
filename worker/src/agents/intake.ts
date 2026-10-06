@@ -18,7 +18,7 @@ export const HORIZONS = ["1w", "1m", "3m", "date", "q30m", "q1h", "q3h"] as cons
 export const QUICK_HORIZONS = new Set(["q30m", "q1h", "q3h"]);
 export const MIN_PAY = ["relaxed", "standard", "choosy"] as const;
 export const PATIENCE = ["patient", "balanced", "eager"] as const;
-export const MAX_TEXT = 600;
+export const MAX_TEXT = 500;
 export const LIMITS = { usdc: 100_000, sol: 1_000, priceLow: 0.4, priceHigh: 2.5 } as const;
 
 /** Shape only. Field values are validated by `validateIntake`, so a bad value costs a question, not a repair call. */
@@ -163,6 +163,8 @@ export interface IntakeDeps {
   spot: () => number | null;
   quickEnabled?: boolean;
   now?: () => number;
+  /** Public low-lane admission (shared with desk previews): null = full → 429. */
+  admit?: () => (<T>(fn: () => Promise<T>) => Promise<T>) | null;
 }
 
 export class IntakeError extends Error { constructor(message: string, readonly status: number) { super(message); } }
@@ -180,9 +182,12 @@ export class IntakeService {
     const cutoff = this.now() - 60_000;
     this.recent = this.recent.filter((x) => x > cutoff);
     if (this.recent.length >= this.d.maxPerMinute) throw new IntakeError("too many requests, try again in a minute", 429);
+    const runner = this.d.admit ? this.d.admit() : (<T>(fn: () => Promise<T>) => fn());
+    if (!runner) throw new IntakeError("the assistant is busy, try again shortly", 429);
     this.recent.push(this.now());
-    const id = await this.d.repo.createIntakeRun({ text: t, status: "running" });
-    return { id, done: this.run(id, t) };
+    let id: string;
+    try { id = await this.d.repo.createIntakeRun({ text: t, status: "running" }); } catch (e) { void runner(async () => {}); throw e; } // release the slot
+    return { id, done: runner(() => this.run(id, t)) };
   }
 
   private async run(id: string, text: string): Promise<void> {

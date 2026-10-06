@@ -298,15 +298,15 @@ test("roundOutcomes: Live→Resolved and vanished Live on a Resolved epoch; pool
 });
 
 // ---------------- queue ----------------
-test("LlmQueue: serial, lower priority number first, FIFO within a priority", async () => {
+test("LlmQueue: high lane serial, lower priority number first, FIFO within a priority", async () => {
   const q = new LlmQueue();
   const order: string[] = [];
   let running = 0, maxRunning = 0;
   const job = (name: string) => async () => { running++; maxRunning = Math.max(maxRunning, running); await new Promise((r) => setTimeout(r, 5)); order.push(name); running--; return name; };
-  const ps = [q.enqueue(2, job("maker-a")), q.enqueue(2, job("maker-b")), q.enqueue(0, job("desk")), q.enqueue(1, job("intake"))];
+  const ps = [q.enqueue(1, job("maker-a")), q.enqueue(1, job("maker-b")), q.enqueue(0, job("desk")), q.enqueue(2, job("intake"))];
   await Promise.all(ps);
   assert.equal(maxRunning, 1);
-  assert.deepEqual(order, ["maker-a", "desk", "intake", "maker-b"], "first job already running; then by priority");
+  assert.deepEqual(order, ["maker-a", "desk", "maker-b", "intake"], "first job already running; then by priority; low lane last");
   await assert.rejects(q.enqueue(0, async () => { throw new Error("boom"); }), /boom/);
   assert.equal(await q.enqueue(0, async () => "after-error"), "after-error");
 });
@@ -338,4 +338,29 @@ test("agent config: MAKER_LLM defaults on with a Z.ai key, off without; MAKER_LL
 test("extractJsonObject tolerates prose around the object", () => {
   assert.deepEqual(extractJsonObject('Here you go: {"a":1} thanks'), { a: 1 });
   assert.throws(() => extractJsonObject("nothing"));
+});
+
+import { referenceStrikes } from "../src/agents/maker/service.js";
+test("stance reference strikes: quick = 1–2 ticks OTM (real fair values on a 10-min epoch); std = 2 % / 5 % OTM", () => {
+  const tick = 100_000n; // $0.10
+  assert.deepEqual(referenceStrikes("Quick", "put", 119.43, tick), ["119400000", "119300000"]);
+  assert.deepEqual(referenceStrikes("Quick", "call", 119.43, tick), ["119500000", "119600000"]);
+  assert.deepEqual(referenceStrikes("Quick", "put", 119.4, tick), ["119300000", "119200000"], "on-tick spot → next tick below");
+  assert.deepEqual(referenceStrikes("Std", "put", 120, tick), ["117600000", "114000000"]);
+  assert.deepEqual(referenceStrikes("Std", "call", 120, tick), ["122400000", "126000000"]);
+});
+
+test("MemoryRepo.abandonStaleDeskRuns marks only running rows created before the cutoff", async () => {
+  const repo = new MemoryRepo();
+  const a = await repo.createDeskRun({ plan_pubkey: "P", kind: "round", status: "running" });
+  const b = await repo.createDeskRun({ plan_pubkey: "P", kind: "round", status: "running" });
+  await repo.updateDeskRun(b, { status: "skip" });
+  await new Promise((r) => setTimeout(r, 5));
+  const cutoff = new Date().toISOString(); // "worker start"
+  await new Promise((r) => setTimeout(r, 5));
+  const c = await repo.createDeskRun({ plan_pubkey: "P", kind: "round", status: "running" });
+  assert.equal(await repo.abandonStaleDeskRuns(cutoff), 1);
+  assert.equal((await repo.getDeskRun(c))!.status, "running", "this process's run is untouched");
+  assert.equal((await repo.getDeskRun(a))!.status, "abandoned");
+  assert.equal((await repo.getDeskRun(b))!.status, "skip");
 });
