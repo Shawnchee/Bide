@@ -1,7 +1,8 @@
 // Pure plan math for the /earn form, the confirmation card and the payoff slider.
 // Units follow BUILD §3.1: strike = USDC base units per 1 whole asset; size = asset base units.
 
-import type { AssetInfo } from "./constants";
+import { LEND_DUST_BUFFER, lendMarketForMint } from "@bide/shared";
+import { USDC_MINT, type AssetInfo } from "./constants";
 import type { Patience, PlanSide } from "./types";
 
 export type Goal = "buy" | "sell" | "both";
@@ -169,6 +170,11 @@ export interface Draft {
   /** What the user locks: USDC base units (buy/both) or asset base units (sell). */
   lockAmount: bigint;
   lockIsUsdc: boolean;
+  /**
+   * What create_plan actually moves out of the wallet: lockAmount + LEND_DUST_BUFFER when the collateral mint has a
+   * Jupiter Lend market (USDC, WSOL), else lockAmount. The buffer comes back when the plan closes.
+   */
+  depositAmount: bigint;
   notional: bigint;
   error: string | null;
 }
@@ -196,6 +202,8 @@ export function buildDraft(d: DraftInput): Draft {
     lockAmount = notionalUp(target, size, asset.decimals);
   }
   const notional = notionalDown(target, size, asset.decimals);
+  const collateralMint = sellSide ? asset.mint : USDC_MINT;
+  const depositAmount = lockAmount > 0n && lendMarketForMint(collateralMint) ? lockAmount + LEND_DUST_BUFFER : lockAmount;
 
   const secsLeft = d.horizonEnd - d.now;
   const maxExpirySecs = d.quick ? 20 * 60 : Math.max(DAY, Math.min(secsLeft, 35 * DAY));
@@ -223,6 +231,7 @@ export function buildDraft(d: DraftInput): Draft {
     },
     lockAmount,
     lockIsUsdc: !sellSide,
+    depositAmount,
     notional,
     error,
   };

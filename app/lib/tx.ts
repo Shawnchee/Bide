@@ -53,8 +53,9 @@ export async function buildCreatePlanTx(
   const client = getBideClient(conn);
   if (!client) throw new ProgramNotReadyError();
   const pre: TransactionInstruction[] = [];
-  // Sell plans on SOL lock WSOL: wrap native SOL in the same transaction.
-  if (!draft.lockIsUsdc && asset.mint.equals(WSOL_MINT)) pre.push(...wrapSolIxs(owner, draft.lockAmount));
+  // Sell plans on SOL lock WSOL: wrap native SOL in the same transaction. create_plan pulls size + LEND_DUST_BUFFER
+  // (draft.depositAmount) from the WSOL account, so wrap that, not just the size.
+  if (!draft.lockIsUsdc && asset.mint.equals(WSOL_MINT)) pre.push(...wrapSolIxs(owner, draft.depositAmount));
   const planIxs = await client.createPlanIxs({ conn, owner, asset, args: draft.args });
   return compileV0(conn, owner, [...pre, ...planIxs], { cuLimit: LEND_CU_LIMIT });
 }

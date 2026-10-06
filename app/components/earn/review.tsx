@@ -109,10 +109,17 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
       : null;
   const lendNote = apy ? `${(apy.bps / 100).toFixed(2)}% APY · ≈ $0 on devnet — no borrowers` : "≈ $0 on devnet — no borrowers";
 
-  // The program moves principal + a 10-base-unit Lend dust buffer, so buys need 0.01 USDC headroom; sells keep a SOL
-  // margin for rent/fees (A-M2).
-  const BALANCE_BUFFER = 0.01;
-  const needWhole = lockWhole + BALANCE_BUFFER;
+  // create_plan moves draft.depositAmount = lock + LEND_DUST_BUFFER base units (Lend markets: USDC, WSOL), so check
+  // that exact amount. Sells on SOL also need a SOL margin for the WSOL account rent and network fees (A-M2).
+  const SOL_FEE_MARGIN = 0.01;
+  const lockDecimals = draft.lockIsUsdc ? 6 : asset.decimals;
+  const depositWhole = Number(draft.depositAmount) / 10 ** lockDecimals;
+  const extraBase = draft.depositAmount - draft.lockAmount;
+  const extraText =
+    extraBase > 0n
+      ? `${(Number(extraBase) / 10 ** lockDecimals).toLocaleString("en-US", { maximumFractionDigits: lockDecimals })} ${draft.lockIsUsdc ? "USDC" : asset.symbol}`
+      : null;
+  const needWhole = depositWhole + (draft.lockIsUsdc ? 0 : SOL_FEE_MARGIN);
   const haveWhole = draft.lockIsUsdc ? usdcBal : solBal;
   const shortfall = publicKey && haveWhole !== null && haveWhole < needWhole ? needWhole - haveWhole : null;
   const balanceShort = shortfall !== null;
@@ -120,7 +127,9 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
     shortfall === null
       ? ""
       : draft.lockIsUsdc
-        ? `${(Math.ceil(shortfall * 100) / 100).toFixed(2)} USDC`
+        ? shortfall >= 0.01
+          ? `${(Math.ceil(shortfall * 100) / 100).toFixed(2)} USDC`
+          : `${(Math.ceil(shortfall * 1e6) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 6 })} USDC`
         : `${fmtSize(Math.ceil(shortfall * 1e4) / 1e4)} ${asset.symbol}`;
   const program = useProgram();
   const client = program.status === "ready" ? program.client : null;
@@ -306,6 +315,12 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
               <p className="text-xs font-medium text-muted-foreground">You set aside</p>
               <p className="num mt-1 text-[26px] leading-tight font-semibold tracking-tight">{lockLabel}</p>
               <p className="mt-1 text-xs text-muted-foreground">Earns Jupiter Lend interest while it waits.</p>
+              {extraText && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Plus a tiny <span className="num">{extraText}</span> extra so Jupiter Lend never comes up short. You get it back when the
+                  plan ends.
+                </p>
+              )}
             </div>
             <p className="px-1 text-[13px] text-muted-foreground">Limits enforced on-chain. Stop anytime between rounds.</p>
             {!publicKey ? (
@@ -332,7 +347,9 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
                 {balanceShort && (
                   <p className="text-sm text-destructive">
                     You have {draft.lockIsUsdc ? `${fmtPrice(usdcBal ?? 0)} USDC` : `${fmtSize(solBal ?? 0)} SOL`} — you need{" "}
-                    {shortfallText} more ({draft.lockIsUsdc ? `${fmtPrice(lockWhole)} + 0.01 USDC buffer` : `${fmtSize(lockWhole)} + 0.01 SOL for fees`}).
+                    {shortfallText} more ({lockLabel}
+                    {extraText ? ` + ${extraText} you get back at the end` : ""}
+                    {draft.lockIsUsdc ? "" : " + 0.01 SOL for fees"}).
                   </p>
                 )}
               </div>
