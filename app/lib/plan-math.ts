@@ -271,7 +271,7 @@ const money = (n: number) => `$${cents(n).toLocaleString("en-US", { minimumFract
  */
 export function payoff(p: PayoffInput, symbol: string): PayoffResult {
   const earned = cents((p.premiumNet ?? 0) + (p.lendYield ?? 0));
-  const earnedRow: PayoffRow[] = earned > 0 ? [{ label: "Earned (upfront pay + interest est.)", value: earned }] : [];
+  const earnedRow: PayoffRow[] = earned > 0 ? [{ label: "Earned (upfront pay + mainnet-rate interest est.)", value: earned }] : [];
   const keepEarned = earned > 0 ? ` You keep the ${money(earned)} earned.` : " You keep the pay.";
   const done = (filled: boolean, headline: string, detail: string, rows: PayoffRow[], holdValue: number): PayoffResult => ({
     filled,

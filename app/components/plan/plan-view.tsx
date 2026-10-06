@@ -24,6 +24,7 @@ import { useTable } from "@/hooks/use-table";
 import { useNow } from "@/hooks/use-now";
 import { useStatus } from "@/hooks/use-status";
 import { useProgram } from "@/hooks/use-program";
+import { useLendReferenceApy } from "@/hooks/use-lend-reference";
 import { cn } from "@/lib/utils";
 
 const STAGES = ["Auction", "Live", "Sampling", "Resolved"] as const;
@@ -198,6 +199,17 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
   // Lend interest = value of the plan's fTokens − principal. Exchange price read from the Lend
   // `Lending` account (1e12 precision, refreshes on each Lend interaction — slightly conservative).
   const [lendYield, setLendYield] = useState<{ amount: number; unit: string } | null>(null);
+  // Mainnet-rate estimate (devnet Lend has no borrowers, so the on-chain figure stays ≈ $0).
+  const lendPlan = chainPlan && typeof chainPlan === "object" ? chainPlan : null;
+  const lendUsdcSide = lendPlan ? lendPlan.side === "buy" || (lendPlan.side === "wheel" && lendPlan.phase === "accumulate") : true;
+  const refApyBps = useLendReferenceApy(lendUsdcSide ? "USDC" : "SOL");
+  const lendMainnetSub = (() => {
+    if (refApyBps === null) return "realised on close";
+    const apy = `${(refApyBps / 100).toFixed(2)}% APY`;
+    if (!lendPlan || lendPlan.collateralPrincipal === 0n) return `mainnet ≈ ${apy}, realised on close`;
+    const perDay = (Number(lendPlan.collateralPrincipal) / (lendUsdcSide ? 1e6 : 1e9)) * (refApyBps / 10_000) / 365;
+    return `mainnet ≈ ${apy} (${lendUsdcSide ? usd(perDay) : `${perDay.toFixed(6)} SOL`}/day), realised on close`;
+  })();
   useEffect(() => {
     const dp = chainPlan && typeof chainPlan === "object" ? chainPlan : null;
     if (!dp || dp.lendShares === 0n) return;
@@ -335,8 +347,14 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
         <div className="bg-card p-4">
           <Stat
             label="Lend interest"
-            value={lendYield ? (lendYield.unit === "USDC" ? usd(lendYield.amount) : `${lendYield.amount.toFixed(6)} SOL`) : "—"}
-            sub="Jupiter Lend, on-chain"
+            value={
+              lendYield && lendYield.amount >= (lendYield.unit === "USDC" ? 0.005 : 0.00005)
+                ? lendYield.unit === "USDC"
+                  ? usd(lendYield.amount)
+                  : `${lendYield.amount.toFixed(6)} SOL`
+                : "≈ $0 on devnet"
+            }
+            sub={lendMainnetSub}
           />
         </div>
         <div className="bg-card p-4">

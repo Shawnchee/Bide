@@ -97,17 +97,17 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
   const lockLabel = draft.lockIsUsdc ? `${fmtPrice(lockWhole)} USDC` : `${fmtSize(lockWhole)} ${asset.symbol}`;
   const buy = goal !== "sell";
   const checkText = checkAt ? dateTimeUtc(checkAt) : draft.args.quick ? "the end of each 10-minute round" : "08:00 UTC on each round's end date";
-  // Interest estimate on everything set aside, until this round's check: the desk's lend_apy trace
-  // (devnet on-chain rate, else Jupiter's mainnet reference), else the worker's cached mainnet reference.
+  // Interest estimate on everything set aside, until this round's check, at Jupiter Lend's MAINNET rate
+  // (worker's cached reference, else the desk's lend_apy trace). Devnet Lend has no borrowers, so it pays ≈ $0.
   const deskApy = lendApy(data?.memo ?? null);
   const refApyBps = useLendReferenceApy(draft.lockIsUsdc ? "USDC" : "SOL");
-  const apy = deskApy && (draft.lockIsUsdc || deskApy.source === "devnet") ? deskApy : refApyBps !== null ? { bps: refApyBps, source: "mainnet reference" as const } : null;
+  const apy = refApyBps !== null ? { bps: refApyBps } : deskApy?.source === "mainnet reference" ? { bps: deskApy.bps } : null;
   const lockedUsd = draft.lockIsUsdc ? lockWhole : spot ? lockWhole * spot : null;
   const lendYieldEst =
     apy !== null && checkAt && nowSec && lockedUsd !== null
       ? (lockedUsd * (apy.bps / 10_000) * Math.max(0, checkAt - nowSec)) / (365 * 86400)
       : null;
-  const lendNote = apy ? `${(apy.bps / 100).toFixed(2)}% APY${apy.source === "devnet" ? "" : ", Jupiter mainnet reference"}` : null;
+  const lendNote = apy ? `${(apy.bps / 100).toFixed(2)}% APY · ≈ $0 on devnet — no borrowers` : "≈ $0 on devnet — no borrowers";
 
   const balanceShort =
     publicKey &&

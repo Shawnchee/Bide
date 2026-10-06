@@ -15,7 +15,7 @@ interface Props {
   lockTotal: number;
   premiumNet: number | null;
   lendYield: number | null;
-  /** e.g. "4.01% APY, Jupiter mainnet reference" — shown under the interest estimate. */
+  /** e.g. "4.01% APY · ≈ $0 on devnet — no borrowers" — shown under the interest estimate. */
   lendNote: string | null;
   checkAt: number | null;
   spot: number | null;
@@ -68,15 +68,13 @@ export function PayoffSlider({ goal, symbol, strike, size, lockTotal, premiumNet
           <dd className="num mt-0.5 text-sm font-semibold text-foreground">{premiumNet !== null ? usd(premiumNet) : "set at auction"}</dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Lend interest (est.)</dt>
-          {lendYield !== null ? (
-            <dd className="mt-0.5">
-              <span className="num text-sm font-semibold text-foreground">{usd(lendYield)}</span>
-              {lendNote && <span className="mt-0.5 block text-[11px] text-muted-foreground">{lendNote}</span>}
-            </dd>
-          ) : (
-            <dd className="mt-0.5 text-sm text-foreground">earns Jupiter Lend interest</dd>
-          )}
+          <dt className="text-muted-foreground">Lend interest (mainnet rate, est.)</dt>
+          <dd className="mt-0.5">
+            <span className={lendYield !== null ? "num text-sm font-semibold text-foreground" : "text-sm text-foreground"}>
+              {lendYield !== null ? usd(lendYield) : "earns Jupiter Lend interest"}
+            </span>
+            {lendNote && <span className="mt-0.5 block text-[11px] text-muted-foreground">{lendNote}</span>}
+          </dd>
         </div>
       </dl>
 
