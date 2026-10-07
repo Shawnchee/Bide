@@ -64,7 +64,7 @@ Screenshots (taken while round 2 was live):
 |---|---|
 | "Buy SOL at $110" | Sells cash-secured puts at $110. USDC collateral sits in Jupiter Lend. |
 | "Sell my SOL at $150" | Sells covered calls at $150. SOL collateral sits in the Jupiter Lend WSOL market. |
-| "Buy at $110, then sell at $150" | Wheel: puts until filled, then `flip_plan`, then calls. |
+| "Buy at $110, then sell at $150" | Wheel: puts until filled, then `flip_plan`, then calls. Supported and tested in the program, but **not offered in the app form yet**, which takes one side per plan. |
 
 1. **Plan.** The user signs `create_plan` once: side, target price, size, deadline, minimum yield per day, maximum expiry, rounds per day. Collateral goes into Jupiter Lend by CPI.
 2. **Epoch.** Rounds join a shared epoch per asset and expiry. Standard epochs settle at 08:00 UTC. An opt-in, labelled **quick plan** uses 10-minute epochs on the same code path.
