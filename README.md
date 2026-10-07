@@ -15,19 +15,44 @@ Built at TOKEN2049 Origins (Main track + Solana "Best Use of Solana"). **Devnet 
 1. **Wallet.** Phantom → Settings → Developer settings → Testnet mode → Solana **Devnet**. (On mainnet the transaction simulation fails.)
 2. **SOL.** [faucet.solana.com](https://faucet.solana.com) → about 1 devnet SOL for fees and rent.
 3. **USDC.** [faucet.circle.com](https://faucet.circle.com) → Solana Devnet → about 20 USDC (mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, the one devnet Jupiter Lend accepts).
-4. **Plan.** Open [bide-token.vercel.app/earn](https://bide-token.vercel.app/earn) → **Buy cheaper** → turn on **Quick plan (10-minute rounds)** → Eager → **$20 or less** → review → sign once. Your USDC goes into Jupiter Lend.
-   Phantom shows devnet USDC as **Unknown** and warns "this domain is new"; both are expected. On the plan screen, pick **Eager** (a price close to spot): on a 10-minute round a Balanced price pays about nothing and the desk answers "wait for now".
+4. **Plan.** Open [bide-token.vercel.app/earn](https://bide-token.vercel.app/earn). The plan is one sentence, "I want to **buy** **$20** of **SOL** at **$…** by **…**"; tap each coloured word to change it. Set the amount to **$20 or less** and the date to **30 minutes** (a quick plan with 10-minute rounds; the price moves close to spot automatically). Under the sentence you see the estimated pay per round and the chance it fills, priced live from 4 exchanges' option quotes. **Preview my plan** → review → sign once. Your USDC goes into Jupiter Lend.
+   Phantom shows devnet USDC as **Unknown** and warns "this domain is new"; both are expected. The step-by-step form is still there under **Use the detailed form**; on a quick plan pick **Eager** there, because a Balanced price pays about nothing on a 10-minute round and the desk answers "wait for now".
 5. **Watch.** `/plan/<id>` shows the round, premium, oracle samples and settlement. `/desk` shows each AI desk run, the Clef scores and the memo hash. `/auctions` shows the tape, each maker's bid and thesis, and maker P&L.
 
 The first round can take **10–20 minutes**: it joins the next 10-minute epoch whose auction window is still open. Keep the size small; a far-from-spot target on a normal plan may get "the desk would wait for now" — the quick plan above is the reliable path. The two maker bots hold about 1 WSOL each. If the worker is down, your funds stay in Lend: you can close the plan between rounds, and anyone can expire it after the deadline.
 
-## Screenshots (live devnet, 6 Oct 2026)
+## Real run (live devnet, 6 Oct 2026)
 
-A real position opened from Phantom during judging prep: plan `21Kas7SQ…ZFae`, buy 0.1654 SOL at $120.90, $20 USDC, quick plan. It is a quick plan, so each round pays cents; a day-long round pays far more.
+A real position opened from a Phantom wallet during judging prep: plan [`21Kas7SQ…ZFae`](https://explorer.solana.com/address/21Kas7SQBA44SmywihAsju9vHjEfTNqpADHSDHpFZFae?cluster=devnet), a quick plan to buy 0.1654 SOL at $120.90 with $20 USDC (wallet 52.02 → 32.02 USDC). It ran three 10-minute rounds, and the last one filled. Each round pays cents because it is short and small; a day-long round pays far more.
+
+| Round | Result | Premium paid to you |
+|---|---|---|
+| 1 (22:30 UTC) | Resolved, not filled; USDC kept | $0.0010 |
+| 2 (22:40 UTC) | Taken by an AI buyer, resolved, not filled | $0.0017 |
+| 3 (ended 23:18 UTC) | **Filled:** bought 0.1654 SOL at $120.90 | $0.0044 |
+| **Earned after Bide's fee** | | **$0.0071** |
+
+Round 3 in detail:
+
+| Metric | Value |
+|---|---|
+| Fair price (Black-Scholes at the median implied volatility of 4 venues, Pyth spot) | $0.0056; fair IV about 0.4145; the venues' IV spread was 11 vol points |
+| AI buyer 1 (won) | offered $0.0051, 60% sure |
+| AI buyer 2 (lost) | offered $0.0048, 55% sure |
+| Paid to you | $0.0044 |
+| Pyth samples | 10 of 10, from $120.87 down to $120.81 |
+| Settlement price (median) | $120.82, below the $120.90 strike, so it filled |
+| Lend interest | about $0 on devnet; the plan page projects about 4.26% APY on mainnet |
+
+Transactions (devnet): [AI buyer 1 proof link](https://explorer.solana.com/tx/GMJEDcHo8MioqNJ12mexModRUypa3TbkNqBYB49Tiskdk3JT839HqYv8RzbYF6Bv8T23zr8hruiWK1q8Z9gvEJT?cluster=devnet) · [resolve](https://explorer.solana.com/tx/1q4RH4YTx8p8XHuRMdJpstX9KipmbU4rS6GEzHLmxnEBvyuQqzbNvWzrJm3G9zAXba4xnGRuZnae9Bq87aZ1qH8?cluster=devnet) · [withdraw](https://explorer.solana.com/tx/5VnLG4xHnpWvdGoXkKpSwpnbamfNBCLTABV6shoYSbAigQJ9tPat1wixzW3cokFx6p27RTKpBRtaYScPAY4ckr5n?cluster=devnet)
+
+Who decides what: you accept once when you sign `create_plan`. Clef only scores whether the desk should open a round; it never sees the bids. The Solana program runs the auction and enforces your limits. The "% sure" on a bid is the maker's own confidence.
+
+Screenshots (taken while round 2 was live):
 
 | | |
 |---|---|
-| **The position.** Round 1 (22:30 UTC) resolved, not filled, and paid $0.0010. Round 2 was taken by an AI buyer and paid $0.0017. Earned $0.0027 so far. | ![plan page](screenshots/plan-round2.jpg) |
+| **The position** with round 1 resolved (+$0.0010) and round 2 taken (+$0.0017), before round 3 filled. | ![plan page](screenshots/plan-round2.jpg) |
 | **The auction.** Two AI buyers bid with written theses; one wins and the premium lands up front. | ![plan auction](screenshots/plan-auction.jpg) |
 | **Recent rounds across all positions.** 58 rounds paid, $0.1994 to users after fees, and each round's winner and result. | ![auctions tape](screenshots/auctions.jpg) |
 | **The AI desk's decisions** (opened, waited, rejected), each with a proof link. | ![desk feed](screenshots/desk.jpg) |
