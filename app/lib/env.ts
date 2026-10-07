@@ -1,5 +1,6 @@
 // Public (browser-safe) configuration. Server-only values live in lib/server/*.
-export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com";
+/** Unset → the browser uses the /api/rpc proxy (see components/providers.tsx). */
+export const RPC_URL: string | undefined = process.env.NEXT_PUBLIC_RPC_URL || undefined;
 export const CLUSTER = "devnet" as const;
 
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";

@@ -19,9 +19,11 @@ export function Providers({ children }: { children: ReactNode }) {
   // Phantom and Solflare also register via Wallet Standard; explicit adapters keep them listed
   // (with install links) when the extension is missing.
   const wallets = useMemo(() => [new PhantomWalletAdapter(), new SolflareWalletAdapter()], []);
+  // No public RPC configured → go through our /api/rpc proxy (keyed RPC, server-side) instead of rate-limited public devnet.
+  const endpoint = RPC_URL ?? (typeof window !== "undefined" ? `${window.location.origin}/api/rpc` : "https://api.devnet.solana.com");
   return (
     <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
-      <ConnectionProvider endpoint={RPC_URL} config={{ commitment: "confirmed" }}>
+      <ConnectionProvider endpoint={endpoint} config={{ commitment: "confirmed", wsEndpoint: "wss://api.devnet.solana.com/" }}>
         <WalletProvider wallets={wallets} autoConnect>
           <WalletModalProvider>
             <TooltipProvider delayDuration={200}>
