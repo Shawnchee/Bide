@@ -316,7 +316,7 @@ export function SentenceBuilder(p: SentenceBuilderProps) {
 
       <div className="mt-6 flex flex-wrap items-stretch gap-3">
         <div className="min-w-[10rem] rounded-xl bg-secondary px-4 py-3">
-          <p className="text-xs text-muted-foreground">You get paid each round</p>
+          <p className="text-xs text-muted-foreground">{roundEnd ? `Pay for a full-size round to ${roundEnd}` : "Pay for a full-size round"}</p>
           <p className="num mt-0.5 text-xl font-semibold text-primary">
             {payLo !== null && payHi !== null ? (money(payLo) === money(payHi) ? `≈ ${money(payHi)}` : `${money(payLo)}–${money(payHi)}`) : "—"}
           </p>
@@ -327,7 +327,7 @@ export function SentenceBuilder(p: SentenceBuilderProps) {
         </div>
         {buy && size > 0 && (
           <div className="min-w-[10rem] rounded-xl bg-secondary px-4 py-3">
-            <p className="text-xs text-muted-foreground">If it fills, you get</p>
+            <p className="text-xs text-muted-foreground">If it fills, you get up to</p>
             <p className="num mt-0.5 text-xl font-semibold">
               {fmtSize(size)} {p.asset.symbol}
             </p>
@@ -340,7 +340,7 @@ export function SentenceBuilder(p: SentenceBuilderProps) {
           : p.estimate.status === "loading" && !est
             ? "Pricing from live options quotes…"
             : est && roundEnd
-              ? `Estimate for a round ending ${roundEnd}, from ${est.venues} exchange${est.venues === 1 ? "" : "s"}' live options quotes, after Bide's fee. Paid filled or not. The desk sets the real pay and may split the amount across rounds.`
+              ? `Estimate, after Bide's fee, if your whole amount goes into one round ending ${roundEnd}: from the auction floor (0.9 × the exchanges' bid) to fair value (${est.venues} exchange${est.venues === 1 ? "" : "s"}' live options quotes). Paid filled or not. The desk picks each round's size and length, so a smaller or shorter round pays less.`
               : "Pick an amount and a price to see the pay."}
       </p>
 
