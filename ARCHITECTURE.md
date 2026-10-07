@@ -70,7 +70,7 @@ Program `4bwTwLAZqPMLSbdvQQ9UrePJiRBUKgiA8TKV3ydo4tqe`, Anchor 1.0.2, Rust 1.89.
 
 Other PDAs: `["escrow", round]` (round escrow token account, authority = Round PDA), `["pool_mint"]` (LP share mint), and `["lend_auth", plan]` / `["lend_auth", pool]`. The `lend_auth` PDAs hold no data and no lamports. They own every plan and pool token account and sign the Jupiter Lend CPIs.
 
-### Instructions (28)
+### Instructions (29)
 
 | Group | Instructions |
 |---|---|
@@ -78,7 +78,7 @@ Other PDAs: `["escrow", round]` (round escrow token account, authority = Round P
 | Plan | `create_plan`, `update_plan`, `pause_plan`, `flip_plan`, `close_plan`, `expire_plan` |
 | Round | `open_round` (agent only), `take_round`, `pool_take_round`, `cancel_round` |
 | Settlement | `open_epoch`, `post_sample`, `resolve_epoch`, `resolve_round`, `withdraw_collateral`, `unwind_round` |
-| Pool | `init_pool`, `pool_deposit`, `pool_withdraw`, `pool_lend_idle`, `pool_unlend`, `set_pool_params` |
+| Pool | `init_pool`, `pool_deposit`, `pool_withdraw`, `pool_lend_idle`, `pool_unlend`, `set_pool_params`, `migrate_pool` |
 
 ### What `open_round` enforces
 
