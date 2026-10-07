@@ -36,6 +36,8 @@ import { cn } from "@/lib/utils";
 import { HowItWorks } from "./how-it-works";
 import { Review } from "./review";
 import { IntakeBox, type IntakeFields } from "./intake-box";
+import { SentenceBuilder } from "./sentence-builder";
+import { estimateExpiry, useRoundEstimate } from "@/hooks/use-round-estimate";
 
 const GOALS: { id: Goal; label: string; sub: string; icon: typeof ArrowDownRight }[] = [
   { id: "buy", label: "Buy cheaper", sub: "Pay USDC, get SOL", icon: ArrowDownRight },
@@ -140,6 +142,8 @@ export function EarnFlow() {
   /** "Minimum pay" sits behind an Advanced disclosure (default: recommended min pay). */
   const [advOpen, setAdvOpen] = useState(false);
   const [touched, setTouched] = useState(false);
+  /** The one-sentence builder is the default; the step-by-step form stays one click away. */
+  const [mode, setMode] = useState<"sentence" | "form">("sentence");
   /** Intake result waiting to be applied after the preset effects below have run (they reset target/horizon). */
   const [intake, setIntake] = useState<IntakeFields | null>(null);
   /** The assistant couldn't settle a price: keep the field empty and flagged instead of falling back to a preset. */
@@ -171,8 +175,9 @@ export function EarnFlow() {
   }, [spot !== null, goal, quick, assetSym, tick]);
 
   useEffect(() => {
+    // Keep a horizon that already matches the mode (the sentence picks quick and its horizon together).
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHorizon(quick ? "q1h" : "1m");
+    setHorizon((h) => (quick === h.startsWith("q") ? h : quick ? "q1h" : "1m"));
   }, [quick]);
 
   useEffect(() => {
@@ -217,6 +222,8 @@ export function EarnFlow() {
 
   const applyIntake = (f: IntakeFields) => {
     if (f.goal) setGoal(f.goal);
+    // The sentence has no "both" (buy, then sell): show the form for it.
+    if (f.goal === "both") setMode("form");
     if (f.asset && ASSETS[f.asset as AssetSymbol]?.enabled) setAssetSym(f.asset as AssetSymbol);
     if (f.quick !== null && QUICK_PLANS_ENABLED) setQuick(f.quick);
     setIntake(f);
@@ -304,6 +311,19 @@ export function EarnFlow() {
     return `Buy ${sz}${asset.symbol} at $${fmtPrice(strikeDollars)}, then sell it at $${exitDollars ? fmtPrice(exitStrikeDollars) : "—"}, trying until ${by}.`;
   })();
 
+  const estimate = useRoundEstimate({
+    symbol: asset.symbol,
+    kind: buySide ? "put" : "call",
+    strike: draft && !draft.error && strikeDollars > 0 ? strikeDollars : null,
+    expiry: now ? estimateExpiry(now, quick, end) : null,
+    quick,
+  });
+
+  const submit = () => {
+    setTouched(true);
+    if (!formError) setStep("review");
+  };
+
   if (step === "review" && draft && end) {
     return (
       <Review
@@ -324,14 +344,76 @@ export function EarnFlow() {
     <div className="mb-6 max-w-2xl">
       <h1 className="font-display text-2xl leading-tight text-balance sm:text-[28px]">Name your price. Get paid until it fills.</h1>
     </div>
+    {mode === "sentence" ? (
+      <>
+        <SentenceBuilder
+          goal={goal}
+          onGoal={(g) => {
+            // The amount's unit flips (USDC ↔ SOL), so a carried-over number would mean something else.
+            if (g !== goal) setAmountText("");
+            setGoal(g);
+          }}
+          asset={asset}
+          spot={spot}
+          target={target}
+          priceText={priceText}
+          activePreset={priceNeeded ? null : activePreset}
+          onPreset={pickPatience}
+          onTypedPrice={(v) => {
+            const n = Number(v);
+            if (!(n > 0)) return;
+            const snapped = snapDollars(n, tick, !buySide);
+            onTargetText(priceText(snapped));
+          }}
+          amountText={amountText}
+          onAmount={setAmountText}
+          sizeWhole={sizeWhole}
+          strikeDollars={strikeDollars}
+          quick={quick}
+          quickEnabled={QUICK_PLANS_ENABLED}
+          horizon={horizon}
+          onHorizon={(h, q) => {
+            // Entering quick mode: a price close to spot is what pays on a 10-minute round (Balanced pays about nothing).
+            if (q && !quick && !userEdited.current) setPatience("eager");
+            if (q !== quick) setQuick(q);
+            setHorizon(h);
+          }}
+          customDate={customDate}
+          onCustomDate={(d) => {
+            if (quick) setQuick(false);
+            setCustomDate(d);
+            setHorizon("date");
+          }}
+          dates={dates}
+          end={end}
+          estimate={estimate}
+          error={formError}
+          showError={touched}
+          onPreview={submit}
+          onDetailed={() => setMode("form")}
+        />
+        <IntakeBox onApply={applyIntake} />
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <p className="text-[13px] text-muted-foreground">Paid every round, filled or not. Stop anytime.</p>
+          <div className="mt-3 border-t border-border pt-3">
+            <HowItWorks />
+          </div>
+        </div>
+      </>
+    ) : (
+    <>
+    <div className="mb-4">
+      <button type="button" onClick={() => setMode("sentence")} className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+        ← Back to the one-line plan
+      </button>
+    </div>
     <IntakeBox onApply={applyIntake} />
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
       <form
         className="min-w-0 self-start rounded-2xl border border-border bg-card"
         onSubmit={(e) => {
           e.preventDefault();
-          setTouched(true);
-          if (!formError) setStep("review");
+          submit();
         }}
         noValidate
       >
@@ -577,6 +659,8 @@ export function EarnFlow() {
         </div>
       </aside>
     </div>
+    </>
+    )}
     </>
   );
 }
