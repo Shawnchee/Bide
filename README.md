@@ -174,7 +174,7 @@ packages/shared/       IDL, BideClient instruction builders, PDAs, constants
 tests/src/             LiteSVM tests on dumped devnet binaries (fixtures gitignored)
 worker/src/            pricer, keeper, sampler, makers, mirror, desk (Quant/Risk/memo), agents, chain, pyth, db, http
 app/                   Next.js app: / /earn /plan/[id] /plans /desk /auctions /maker /pool, Blink route
-scripts/               devnet init, lookup table, pool, manual round opener, Pyth posting and checks
+scripts/               devnet init, lookup table, pool (init, one-shot migrate-pool), manual round opener, Pyth posting and checks
 supabase/migrations/   schema and RLS
 ```
 
@@ -191,7 +191,7 @@ Environment variable **names** (copy `.env.example` and `app/.env.example`; neve
 pnpm install
 pnpm build:program                   # anchor build
 scripts/dump-fixtures.sh             # once: dump devnet programs and accounts for LiteSVM
-pnpm test:program                    # 34 LiteSVM tests
+pnpm test:program                    # 43 LiteSVM tests
 pnpm --filter @bide/worker test      # 200+ worker tests
 pnpm worker                          # all worker loops + HTTP on 127.0.0.1:8787
 pnpm app                             # Next.js on http://localhost:3000
@@ -203,7 +203,7 @@ Apply the three migrations in `supabase/migrations/` before starting the worker;
 
 - **Devnet only, unaudited.** An audit is needed before real money.
 - **The other side is mostly us.** The two maker agents and the only pool deposit (25 USDC + 0.5 WSOL) are ours. They use the same public instructions anyone can call. The `/pool` deposit button is not wired in the app; deposits go through `scripts/init-pool.ts`.
-- **The pool is unhedged** and probably loses on average. Its caps limit the damage: premium at most 1.5% of notional, 40 USDC open notional, 50% utilisation, 2 USDC spend per 24 h.
+- **The pool is unhedged** and probably loses on average. Its caps limit the damage: premium at most 1.5% of notional, 40 USDC open notional, 50% utilisation, 2 USDC spend per 24 h. It only takes SOL rounds (puts and calls).
 - **Quick-plan pricing is approximate and labelled.** No venue lists 10-minute options, so quick rounds use the nearest listed expiry's IV (flat). Quick premiums are cents.
 - **Devnet spot can be up to 300 s old** (`max_spot_age_secs` 300, raised from 180 after a 227 s feed gap). This makes the open/take spot-move guard much weaker than it would be on mainnet.
 - **AI latency and vetoes cost rounds.** Desk runs take about 50–100 s on one serial GLM queue and one Z.ai key. Clef vetoed about half of proposals on 6 Oct, mostly "rationale does not match the tool numbers"; a fix shipped at 12:41 UTC but its effect on the veto rate is not yet measured. A Z.ai outage means no new rounds; there is no deterministic opener.
@@ -217,6 +217,7 @@ Apply the three migrations in `supabase/migrations/` before starting the worker;
 
 Two external-style adversarial reviews ran on 6 Oct 2026, after an earlier Fable 5.1 review.
 - **Fixed and deployed (devnet slot 508146124):** every program-owned vault and settlement destination is bound to its canonical address (pool deposit/withdraw/lend/take, plan close/expire/update/flip, resolve/unwind/withdraw); `post_sample` rejects updates from the future; collateral shortfalls are logged. 6 new attack tests (34/34 program tests). Worker/app: makers re-price instead of giving up, stale Pyth spot is refused, maker P&L sign fixed, auth on desk-run reads, `/maker` keeps last good data.
+- **Fixed and deployed 7 Oct (program upgrade, then admin-only `migrate_pool`):** pool NAV now marks live option legs at intrinsic value, so nobody can mint LP shares at a stale NAV between `resolve_epoch` and `resolve_round`; `pool_take_round` is SOL-only for calls as well as puts; the Pool account grew from 148 to 180 bytes (four per-kind open sums). 43/43 program tests.
 - **Before mainnet (not fixed on devnet, by design):** atomic deploy + `init_config` (front-run risk); upgrade and pool authority to a multisig; timelock/allowlist on admin oracle and fee changes; refund the premium when an epoch fails and the round unwinds; sanity bounds on Jupiter Lend layout reads and validation of every Lend market account; a formal audit.
 
 ## Pre-existing work
