@@ -20,7 +20,8 @@ export function Providers({ children }: { children: ReactNode }) {
   // (with install links) when the extension is missing.
   const wallets = useMemo(() => [new PhantomWalletAdapter(), new SolflareWalletAdapter()], []);
   // No public RPC configured → go through our /api/rpc proxy (keyed RPC, server-side) instead of rate-limited public devnet.
-  const endpoint = RPC_URL ?? (typeof window !== "undefined" ? `${window.location.origin}/api/rpc` : "https://api.devnet.solana.com");
+  // "devnet" must appear in the URL: Wallet Standard wallets pick their chain from it (getChainForEndpoint), else mainnet.
+  const endpoint = RPC_URL ?? (typeof window !== "undefined" ? `${window.location.origin}/api/rpc?cluster=devnet` : "https://api.devnet.solana.com");
   return (
     <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
       <ConnectionProvider endpoint={endpoint} config={{ commitment: "confirmed", wsEndpoint: "wss://api.devnet.solana.com/" }}>
