@@ -36,8 +36,16 @@ export function estimateExpiry(now: number, quick: boolean, end: number | null):
 }
 
 /** Live, debounced price estimate for one round from the worker's 4-venue options pricer. Never an LLM. */
-export function useRoundEstimate(input: { symbol: string; kind: "put" | "call"; strike: number | null; expiry: number | null; quick: boolean }): RoundEstimateState {
-  const { symbol, kind, strike, expiry, quick } = input;
+export function useRoundEstimate(input: {
+  symbol: string;
+  kind: "put" | "call";
+  strike: number | null;
+  expiry: number | null;
+  quick: boolean;
+  /** Plan end: later fallback expiries never go past it. */
+  end?: number | null;
+}): RoundEstimateState {
+  const { symbol, kind, strike, expiry, quick, end } = input;
   const [state, setState] = useState<RoundEstimateState>({ status: "idle" });
 
   useEffect(() => {
@@ -50,20 +58,26 @@ export function useRoundEstimate(input: { symbol: string; kind: "put" | "call"; 
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const qs = new URLSearchParams({ kind, strike: String(strike), expiry: String(expiry) });
-        if (quick) qs.set("quick", "1");
-        const res = await fetch(`/api/quotes/${symbol}?${qs}`, { signal: ctrl.signal });
-        const body = (await res.json().catch(() => null)) as {
-          quote?: { ok?: boolean; floor?: number | string; fairPremium?: number | string; fillProbability?: number; venues?: unknown[]; reason?: string };
-          venuesStatus?: unknown[];
-        } | null;
-        const q = body?.quote;
-        if (!res.ok || !q) return setState({ status: "error", message: "Live quotes are unavailable right now." });
-        if (!q.ok) return setState({ status: "error", message: "No live quote for this price and date. Try a price closer to now." });
+        // A price far from spot often isn't listed on the nearest expiry; the desk would pick a longer round
+        // for it too, so a standard plan also tries the next two Fridays (never past the plan's end).
+        const tries = quick ? [expiry] : [expiry, expiry + 7 * DAY, expiry + 14 * DAY].filter((e, i) => i === 0 || !end || e <= end);
+        let q: { ok?: boolean; floor?: number | string; fairPremium?: number | string; fillProbability?: number; venues?: unknown[] } | undefined;
+        let used = expiry;
+        for (const e of tries) {
+          const qs = new URLSearchParams({ kind, strike: String(strike), expiry: String(e) });
+          if (quick) qs.set("quick", "1");
+          const res = await fetch(`/api/quotes/${symbol}?${qs}`, { signal: ctrl.signal });
+          const body = (await res.json().catch(() => null)) as { quote?: typeof q } | null;
+          if (!res.ok || !body?.quote) return setState({ status: "error", message: "Live quotes are unavailable right now." });
+          q = body.quote;
+          used = e;
+          if (q.ok) break;
+        }
+        if (!q?.ok) return setState({ status: "error", message: "No live quote for this price and date. Try a price closer to now." });
         setState({
           status: "ready",
           est: {
-            expiry,
+            expiry: used,
             floorPerUnit: Number(q.floor) / 1e6,
             fairPerUnit: Number(q.fairPremium) / 1e6,
             fillProbability: typeof q.fillProbability === "number" ? q.fillProbability : null,
@@ -78,7 +92,7 @@ export function useRoundEstimate(input: { symbol: string; kind: "put" | "call"; 
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [symbol, kind, strike, expiry, quick]);
+  }, [symbol, kind, strike, expiry, quick, end]);
 
   return state;
 }

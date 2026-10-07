@@ -317,6 +317,7 @@ export function EarnFlow() {
     strike: draft && !draft.error && strikeDollars > 0 ? strikeDollars : null,
     expiry: now ? estimateExpiry(now, quick, end) : null,
     quick,
+    end,
   });
 
   const submit = () => {
