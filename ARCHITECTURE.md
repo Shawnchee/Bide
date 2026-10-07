@@ -1,6 +1,6 @@
 # Bide architecture
 
-This document describes how Bide works as built on 6 Oct 2026. It is checked against the code in `programs/`, `worker/`, `app/`, `packages/shared/` and `supabase/migrations/`, and against the devnet logs in `notes/`. Items marked "(unverified)" could not be checked from the repo.
+This document describes how Bide works as built. It is checked against the code in `programs/`, `worker/`, `app/`, `packages/shared/` and `supabase/migrations/`, and against the devnet logs in `notes/`. Items marked "(unverified)" could not be checked from the repo.
 
 ## 1. System overview
 
@@ -50,7 +50,7 @@ flowchart TB
 ```
 
 - **App:** Next.js on Vercel, root directory `app/`. It reads accounts from devnet RPC and history from Supabase. It builds and signs user transactions in the browser.
-- **Worker:** one Node process under pm2 on an ECS VM. Public URL `https://bide-worker.47.250.173.246.sslip.io` (`/health` answered `ok: true, repo: supabase, chain: live` on 6 Oct 14:45 UTC). It binds to the address in `HOST` (default `127.0.0.1`; on the VM, the Docker bridge IP) so only the reverse proxy can reach it. The proxy is the VM's existing Traefik (Coolify) with one added route file: `bide-worker.47.250.173.246.sslip.io` → `http://10.0.1.1:8787`, Let's Encrypt TLS (verified 6 Oct: HTTPS `/health` 200, `/desk/preview` without the secret 401). `/desk/preview` and `/intake` require `WORKER_SHARED_SECRET` (constant-time compare, fails closed when unset).
+- **Worker:** one Node process under pm2 on an ECS VM. Public URL `https://bide-worker.47.250.173.246.sslip.io` (`/health` answered `ok: true, repo: supabase, chain: live`). It binds to the address in `HOST` (default `127.0.0.1`; on the VM, the Docker bridge IP) so only the reverse proxy can reach it. The proxy is the VM's existing Traefik (Coolify) with one added route file: `bide-worker.47.250.173.246.sslip.io` → `http://10.0.1.1:8787`, Let's Encrypt TLS (verified: HTTPS `/health` 200, `/desk/preview` without the secret 401). `/desk/preview` and `/intake` require `WORKER_SHARED_SECRET` (constant-time compare, fails closed when unset).
 - **Chain:** the Bide program on devnet, which calls Jupiter Lend and reads Pyth price accounts verified through Wormhole.
 
 ## 2. On-chain program
@@ -119,7 +119,7 @@ The agent key can propose anything; `open_round` (`instructions/round.rs`) rejec
 
 ### Security review fixes (deployed)
 
-From a Fable 5.1 review on 5 Oct; regression tests in `tests/src/review-fixes.test.ts`, each also run against the pre-fix build:
+From a Fable 5.1 review; regression tests in `tests/src/review-fixes.test.ts`, each also run against the pre-fix build:
 
 1. A token donated into an escrow blocked `cancel_round`. Now the escrow is swept to the plan owner, then closed.
 2. `pool_take_round` had no deadline. Now it needs an Open epoch, `now` before sampling, and at most 60 s after the pool window opens.
@@ -251,7 +251,7 @@ All LLM calls go through one serial queue (`worker/src/agents/queue.ts`). Priori
 - LLM failure, timeout or quota → a deterministic fallback bid, labelled `fallback`.
 - Every bid, including passes, is hashed and stored in `maker_bids`. When a maker-taken round resolves, the mirror writes its P&L (settlement value − premium paid), losses included.
 
-### Worked example (desk run `062aefe5`, 6 Oct, `notes/integration.md`)
+### Worked example (desk run `062aefe5`, `notes/integration.md`)
 
 1. 05:58:32 UTC: the keeper starts the desk 90 s before the 06:00 window (the lead was later raised to 180 s) for a quick buy plan, strike $120.00 locked.
 2. The Quant calls its tools and proposes: open, strike 120.000, size 0.0125 SOL (all remaining), expiry 06:10, auction 30 s, start 3781 / floor 2547 µUSDC. Its rationale cites 4 venues within 7.7 IV points and no macro event before expiry.
@@ -276,7 +276,7 @@ Code: `worker/src/index.ts`. Loops run on a scheduler with per-loop watchdogs (d
 | makers | 2 s | take rounds when the price reaches the bid; holds while the feed is stale |
 | demo-plans | 30 s | opt-in only (`DEMO_OWNER_KEYPAIR`); not enabled on the VM |
 
-- **RPC** (`chain/rpc.ts`): every request has a timeout (default 12 s). Timeout, network error, 5xx or 429 → one retry on public devnet. Each loop has its own connection. This came from a 28-minute keeper hang on 5 Oct.
+- **RPC** (`chain/rpc.ts`): every request has a timeout (default 12 s). Timeout, network error, 5xx or 429 → one retry on public devnet. Each loop has its own connection. This came from a 28-minute keeper hang.
 - **Sender** (`chain/send.ts`): fresh blockhash, compute limit and priority fee, send with no RPC retries, poll status every 1.5 s, re-send the same signed tx every 4 s until confirmed or expired. No websockets.
 - **Stale feed:** keeper and makers hold (no tx) while the push feed is older than `max_spot_age_secs − 15 s`.
 - **Health:** `/health` returns 503 if a loop has 5+ consecutive errors or no success for max(10 × interval, 120 s). Env vars are reported as SET/EMPTY only.
@@ -316,8 +316,8 @@ RLS is on for every table. The worker writes with the service key. Realtime is e
 - **Program: 28 LiteSVM tests** in `tests/src/` (put loop, call loop, wheel, Lend, pool, `update_plan`, 9 negative bound tests, 8 review-fix tests, real-VAA posting). They load the **real devnet binaries and accounts** (Jupiter Lend and Liquidity, Pyth receiver `rec2…`, Wormhole and guardian set 1), dumped by `scripts/dump-fixtures.sh`. LiteSVM is used because the program is gated on wall-clock time and LiteSVM can set the clock. Clock rule: always later than the dumped Lend timestamps and always increasing. The push-feed fixture is re-written with a fresh `publish_time` (real price bytes).
 - `tests/src/pyth-real.test.ts` posts 10 genuine mainnet-Hermes updates through the real Wormhole and receiver binaries into consecutive buckets, and checks that an update one second late or in the wrong bucket is rejected.
 - Rust unit tests cover the math module (notional rounding, auction price, median, Pyth conversion, minimum premium).
-- **Worker: 196 tests**, all passing (`pnpm --filter @bide/worker test`, run 6 Oct). They cover the pricer on real venue snapshots, keeper timing and retries, sampler, RPC timeouts and fallback, the sender, the LLM queue, maker clamps and grounding, intake validation, desk schema, binding, memo hashing and rationale scrub.
-- **Devnet stress test** (6 Oct, `notes/stress-test.md`): hostile inputs to preview and intake (unknown keys, injections, huge numbers, over-long text) got 400 or 429; a `__proto__` key got a 500 from the app guard, fixed afterwards in commit `b43ada2` (not re-tested live); queue contention exposed missed windows, fixed by a 180 s lead and serial keeper runs; after the fix 4 of 4 quick slots opened and filled. A restart during sampling was not tested.
+- **Worker: 196 tests**, all passing (`pnpm --filter @bide/worker test`). They cover the pricer on real venue snapshots, keeper timing and retries, sampler, RPC timeouts and fallback, the sender, the LLM queue, maker clamps and grounding, intake validation, desk schema, binding, memo hashing and rationale scrub.
+- **Devnet stress test** (`notes/stress-test.md`): hostile inputs to preview and intake (unknown keys, injections, huge numbers, over-long text) got 400 or 429; a `__proto__` key got a 500 from the app guard, fixed afterwards in commit `b43ada2` (not re-tested live); queue contention exposed missed windows, fixed by a 180 s lead and serial keeper runs; after the fix 4 of 4 quick slots opened and filled. A restart during sampling was not tested.
 
 ## 11. Known limits and roadmap
 

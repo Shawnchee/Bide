@@ -1,6 +1,6 @@
 # Bide — demo video script (≤ 3:00)
 
-Format (HACKATHON.md): the **whole pitch is one screen recording, ≤ 3 minutes** (organiser slot, confirmed by the user 2026-10-07), **embedded in the .ppt/.key deck** (no live demo on stage, no YouTube link). One story, real devnet transactions. ~380 words of voice-over at a calm pace; aim for 2:50. Cuts are fine (label waits as "10 minutes later"); never fake a screen.
+Format (HACKATHON.md): the **whole pitch is one screen recording, ≤ 3 minutes** (organiser slot), **embedded in the .ppt/.key deck** (no live demo on stage, no YouTube link). One story, real devnet transactions. ~380 words of voice-over at a calm pace; aim for 2:50. Cuts are fine (label waits as "10 minutes later"); never fake a screen.
 
 The video carries everything — problem, demo, why Solana, competitor point, business line — so the deck is only 3 slides: (1) title, (2) the video full-bleed, (3) proof/end card (program ID + cluster devnet, 3 explorer tx links, repo link, "Pre-existing work: none", "Devnet, unaudited").
 
@@ -17,7 +17,7 @@ The video carries everything — problem, demo, why Solana, competitor point, bu
 | 7 | 2:00–2:20 | `/desk` → the real on-chain rejection row (`AuctionParamsInvalid`: the agent proposed a 300 s auction, the program's quick limit is 120 s) → explorer showing the failed tx | "The agent is allowed to try; the program decides. Here it proposed an auction outside the rules, and the chain rejected it in public." |
 | 8 | 2:20–2:35 | **Text card:** 4-column table (Jupiter Trigger · Earn on Recurring · Leaps · Bide), "AI with on-chain guardrails" row highlighted; Leaps labelled "mainnet, audited" | "Leaps sells you one option and leaves you to manage it. Bide runs the whole goal, earns Lend yield on the collateral, and lets anyone be the maker. Thirty-second auctions and ten verified oracle samples only cost cents on Solana." |
 | 9 | 2:35–2:50 | **Text card:** "10% of each premium, on-chain · never the counterparty · devnet, unaudited · next: real makers, audit, mainnet" | "Bide takes 10% of each premium, on-chain, and is never the counterparty. This is devnet and unaudited, and the two AI makers are our demo liquidity. Next: real makers, an audit, mainnet." |
-| 10 | 2:50–3:00 | End card: program ID + "devnet, open source" (or the real daily round settled on **7 Oct 08:00 UTC**, std sell `8kaDR2Sn…`, as a b-roll cut-in earlier) | "Name your price. Get paid until it fills." |
+| 10 | 2:50–3:00 | End card: program ID + "devnet, open source" (or a real daily round settled at **08:00 UTC**, std sell `8kaDR2Sn…`, as a b-roll cut-in earlier) | "Name your price. Get paid until it fills." |
 
 ## Rules for the cut
 - Use only real transactions; every explorer link must match what's on screen.
@@ -26,7 +26,7 @@ The video carries everything — problem, demo, why Solana, competitor point, bu
 - Don't claim the AI broke a *user's price bound* — the real rejection so far is the auction-length rule.
 - No revenue projections; the business card is the fee and the honesty line only.
 - Keep Leaps labelled "mainnet, audited" on the comparison card — don't imply it's weaker as a product.
-- If the 7 Oct 08:00 UTC (16:00 SGT) settlement isn't recorded in time, use the quick-plan cycle for scene 6; submission is 23:59 SGT.
+- If the 08:00 UTC (16:00 SGT) settlement isn't recorded in time, use the quick-plan cycle for scene 6; submission is 23:59 SGT.
 
 ## Backup cuts
 - Desk preview slow → cut from "Preview" to the finished card.

@@ -1,6 +1,6 @@
-# Bide AI agents v2 — design (2026-10-06)
+# Bide AI agents v2 — design
 
-> **Revised after Fable 5.1 review (2026-10-06):** LLM reflection memory **cut** → deterministic `recent_outcomes` tool the desk must cite. Makers output `{stance bid|pass, spread_pct 0–20, thesis, confidence}` — code computes the bid and clamps to [floor, min(start, fair)]; stance decided once per (asset, epoch) via one serial GLM queue; `MAKER_LLM=1` flag with deterministic fallback shown as `source: fallback`; makers never see the desk memo or plan bounds; per-maker P&L ledger shown (losses included); theses must pass the provenance check. Intake built last, 202-and-poll. Where the text below disagrees, this note wins.
+> **Revised after Fable 5.1 review:** LLM reflection memory **cut** → deterministic `recent_outcomes` tool the desk must cite. Makers output `{stance bid|pass, spread_pct 0–20, thesis, confidence}` — code computes the bid and clamps to [floor, min(start, fair)]; stance decided once per (asset, epoch) via one serial GLM queue; `MAKER_LLM=1` flag with deterministic fallback shown as `source: fallback`; makers never see the desk memo or plan bounds; per-maker P&L ledger shown (losses included); theses must pass the provenance check. Intake built last, 202-and-poll. Where the text below disagrees, this note wins.
 
 
 Goal: make AI a larger, *real* part of Bide without letting an LLM touch settlement or the user's
