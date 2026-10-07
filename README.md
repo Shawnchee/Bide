@@ -1,6 +1,6 @@
 # Bide
 
-**Name the price you want. Get paid until you get it.**
+**Name your price. Get paid until it fills.**
 
 A limit order on Solana earns nothing while it waits. Bide turns "buy SOL at $110" or "sell my SOL at $150" into a series of short, fully collateralised options rounds (cash-secured puts or covered calls). Each round pays the user a premium up front, while the collateral earns Jupiter Lend interest. An AI desk proposes each round, a decision model judges it, and a Solana program enforces the limits the user signed.
 
@@ -9,18 +9,29 @@ Built at TOKEN2049 Origins (Main track + Solana "Best Use of Solana"). **Devnet 
 - Live app: https://bide-token.vercel.app
 - Program: [`4bwTwLAZqPMLSbdvQQ9UrePJiRBUKgiA8TKV3ydo4tqe`](https://explorer.solana.com/address/4bwTwLAZqPMLSbdvQQ9UrePJiRBUKgiA8TKV3ydo4tqe?cluster=devnet) (Solana devnet)
 - Technical design: [ARCHITECTURE.md](ARCHITECTURE.md)
-- Deck / video: <!-- TODO: deck / video link -->
-- Product spec and decision log: [SPEC.md](SPEC.md). Lane notes and devnet logs: [notes/](notes/)
 
 ## Try it yourself (devnet, 5 steps)
 
-1. **Wallet.** Phantom → Settings → Developer settings → Testnet mode → Solana **Devnet**.
+1. **Wallet.** Phantom → Settings → Developer settings → Testnet mode → Solana **Devnet**. (On mainnet the transaction simulation fails.)
 2. **SOL.** [faucet.solana.com](https://faucet.solana.com) → about 1 devnet SOL for fees and rent.
 3. **USDC.** [faucet.circle.com](https://faucet.circle.com) → Solana Devnet → about 20 USDC (mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, the one devnet Jupiter Lend accepts).
-4. **Plan.** Open [bide-token.vercel.app/earn](https://bide-token.vercel.app/earn) → **Buy cheaper** → turn on **Quick plan (10-minute rounds)** → Balanced → **$20 or less** → review → sign once. Your USDC goes into Jupiter Lend.
+4. **Plan.** Open [bide-token.vercel.app/earn](https://bide-token.vercel.app/earn) → **Buy cheaper** → turn on **Quick plan (10-minute rounds)** → Eager → **$20 or less** → review → sign once. Your USDC goes into Jupiter Lend.
+   Phantom shows devnet USDC as **Unknown** and warns "this domain is new"; both are expected. On the plan screen, pick **Eager** (a price close to spot): on a 10-minute round a Balanced price pays about nothing and the desk answers "wait for now".
 5. **Watch.** `/plan/<id>` shows the round, premium, oracle samples and settlement. `/desk` shows each AI desk run, the Clef scores and the memo hash. `/auctions` shows the tape, each maker's bid and thesis, and maker P&L.
 
-The first round can take **10–20 minutes**: it joins the next 10-minute epoch whose auction window is still open. Keep the size small; the two maker bots hold about 1 WSOL each. If the worker is down, your funds stay in Lend: you can close the plan between rounds, and anyone can expire it after the deadline.
+The first round can take **10–20 minutes**: it joins the next 10-minute epoch whose auction window is still open. Keep the size small; a far-from-spot target on a normal plan may get "the desk would wait for now" — the quick plan above is the reliable path. The two maker bots hold about 1 WSOL each. If the worker is down, your funds stay in Lend: you can close the plan between rounds, and anyone can expire it after the deadline.
+
+## Screenshots (live devnet, 6 Oct 2026)
+
+A real position opened from Phantom during judging prep: plan `21Kas7SQ…ZFae`, buy 0.1654 SOL at $120.90, $20 USDC, quick plan. It is a quick plan, so each round pays cents; a day-long round pays far more.
+
+| | |
+|---|---|
+| **The position.** Round 1 (22:30 UTC) resolved, not filled, and paid $0.0010. Round 2 was taken by an AI buyer and paid $0.0017. Earned $0.0027 so far. | ![plan page](screenshots/plan-round2.jpg) |
+| **The auction.** Two AI buyers bid with written theses; one wins and the premium lands up front. | ![plan auction](screenshots/plan-auction.jpg) |
+| **Recent rounds across all positions.** 58 rounds paid, $0.1994 to users after fees, and each round's winner and result. | ![auctions tape](screenshots/auctions.jpg) |
+| **The AI desk's decisions** (opened, waited, rejected), each with a proof link. | ![desk feed](screenshots/desk.jpg) |
+| **Why the desk opened this round:** the Quant's full reasoning and Clef's risk scores. | ![desk reasoning](screenshots/desk-reasoning.jpg) |
 
 ## How it works
 
@@ -73,11 +84,11 @@ flowchart LR
 - **Devnet Jupiter Lend pays ≈ $0** — no borrowers. On-chain exchange rates on 6 Oct 15:40 UTC: USDC `token_exchange_price` 1.010325 (flat vs 5 Oct), WSOL 1.000000 (never accrued).
 - **Mainnet Lend pays ≈ 4% APY** (Jupiter API reference). It accrues continuously (the jlToken share price rises), not as a daily payout. In Bide it stays in Lend: `withdraw_collateral` pays only what the counterparty is owed; the interest reaches the user on `close_plan` / `expire_plan`.
 - **The premium is the main income.** The daily round [`5Ccf…dpcc`](https://explorer.solana.com/address/5CcfmgSseQNn8jQUWCDpBx1pJLrtzzj5ZLUCNbRydpcc?cluster=devnet) paid ≈ 0.54% of notional (after fee) for ~24 h, vs ≈ 0.011%/day for Lend at 4% APY. Quick (10-minute) rounds pay 0.001–0.12% of notional each.
-- **Totals so far** (6 Oct 15:35 UTC): 22 paid rounds, $0.1226 to users after fee, $0.0136 in Bide fees. Live on `/auctions`.
+- **Totals** (snapshot; latest round 6 Oct 15:50 UTC): 25 paid rounds, $0.1465 to users after fee, $0.0163 in Bide fees. Live and current on `/auctions`.
 
 ## Evidence (devnet)
 
-All links are Solana Explorer on devnet. Every signature below was re-checked against devnet RPC on 6 Oct 2026. Amounts and context: [notes/integration.md](notes/integration.md), [notes/data-flow-fixes.md](notes/data-flow-fixes.md), [notes/stress-test.md](notes/stress-test.md).
+All links are Solana Explorer on devnet. Every signature below was re-checked against devnet RPC on 6 Oct 2026.
 
 | Path | Context | Transactions |
 |---|---|---|
@@ -91,7 +102,7 @@ All links are Solana Explorer on devnet. Every signature below was re-checked ag
 | `unwind_round` (epoch Failed) | 5 Oct: keeper hung on one RPC call and missed every sample | `take_round` [V6wCdKUh…](https://explorer.solana.com/tx/V6wCdKUhurDk5jZpgJ4FEy2DbcsefiWTu9r2xNJRvDbcbwbZNuuHycEYU6ydQaWAsjE91ZH12DY4SkpcFBESidX?cluster=devnet) · `unwind_round` [q27k3UEX…](https://explorer.solana.com/tx/q27k3UEXBsJcoRMkyy8PPL74Pg3ZfQJgoRDeDbgQUa6y1P9ZcLvgbPUAJTFMFS13KJNwBo8Yf52jYtrbbw5wwxG?cluster=devnet) |
 | `expire_plan` after deadline | sell plan `9AJ9QTKU…` | [2HbKYmv2…](https://explorer.solana.com/tx/2HbKYmv2GRfLaxaZZnMypGRheft8kAcJ395k8SH8P7A3MjABXyKQQUhSq8LaeEMSVExKvnfwUzky86SVKVZZMUma?cluster=devnet) |
 | No taker → `cancel_round` | std put round, 6 Oct 08:08 UTC (feed stale, no pool yet) | [2zDjcYRW…](https://explorer.solana.com/tx/2zDjcYRWgTGE4XhtPRkawEc5tpx4mDavp36p7o4JYbJuxE9Um2XEXbKw4qEUUKgDHeXPsSVhfVvPtonsNAJhBEHX?cluster=devnet) |
-| **Live std round** | call `5CcfmgSs…`, K $121.10, opened by the AI desk, taken by maker-2. Samples 7 Oct 07:30–08:00, **settles 7 Oct 08:00 UTC** (not settled at time of writing). | `open_round` [3rVN2AQR…](https://explorer.solana.com/tx/3rVN2AQRcYBpXPpNgWfPRM6xxWHJmXrrELFbdHZVtEKfdz8dRRTn7orqwwbprWD97gn4HGevbuNhavH6LvYqN4Ps?cluster=devnet) · `take_round` [kPKLj9Ju…](https://explorer.solana.com/tx/kPKLj9JuHqquLgdDCLod9swoExxkSWmfYMjuAnypatFm2HszLARTSjHJ4EAQMjvKXwDuu6zKbzrCbFt8afn9AdF?cluster=devnet) |
+| **Live std round** | call `5CcfmgSs…`, K $121.10, opened by the AI desk, taken by maker-2. Samples 7 Oct 07:30–08:00, **settles 7 Oct 08:00 UTC**; the outcome is on `/auctions` once it resolves. | `open_round` [3rVN2AQR…](https://explorer.solana.com/tx/3rVN2AQRcYBpXPpNgWfPRM6xxWHJmXrrELFbdHZVtEKfdz8dRRTn7orqwwbprWD97gn4HGevbuNhavH6LvYqN4Ps?cluster=devnet) · `take_round` [kPKLj9Ju…](https://explorer.solana.com/tx/kPKLj9JuHqquLgdDCLod9swoExxkSWmfYMjuAnypatFm2HszLARTSjHJ4EAQMjvKXwDuu6zKbzrCbFt8afn9AdF?cluster=devnet) |
 
 **On-chain rejections (real failed transactions, error code in the logs):**
 
@@ -103,9 +114,46 @@ All links are Solana Explorer on devnet. Every signature below was re-checked ag
 
 No strike, size, expiry or minimum-yield rejection has happened yet.
 
-**Stress test (6 Oct, [notes/stress-test.md](notes/stress-test.md)):** after the queue and timing fixes went live at 12:41 UTC, 4 of 4 quick slots opened and were taken (1 by a maker, 3 by the pool). After quick rounds were priced from the auction-window open (deployed 14:31 UTC), the next 3 rounds were all taken by the AI maker agents (LLM bids), none by the pool. Before the fixes, about 2 of 3 slots were lost to missed windows and Clef vetoes.
+**Stress test (6 Oct):** after the queue and timing fixes went live at 12:41 UTC, 4 of 4 quick slots opened and were taken (1 by a maker, 3 by the pool). After quick rounds were priced from the auction-window open (deployed 14:31 UTC), the next 3 rounds were all taken by the AI maker agents (LLM bids), none by the pool. Before the fixes, about 2 of 3 slots were lost to missed windows and Clef vetoes.
 
 ## Tech stack
+
+Four pieces. The browser and the program are the only two that touch the user's money. The worker is a helper that can go down without funds getting stuck.
+
+```mermaid
+flowchart LR
+  subgraph You["Your browser"]
+    UI["Next.js app (Vercel)<br/>builds the transaction"]
+    WAL["Phantom / Solflare<br/>signs it"]
+  end
+  subgraph Worker["Worker (one Node process on a VM)"]
+    PRC["Pricer<br/>CEX quotes → fair premium"]
+    DESK["AI desk<br/>Quant proposes, Clef judges"]
+    KEEP["Keeper + sampler + maker bots<br/>send chain transactions"]
+  end
+  subgraph Chain["Solana devnet"]
+    PROG{{"Bide program<br/>holds collateral, runs auction, settles"}}
+    LEND[("Jupiter Lend<br/>collateral earns interest")]
+    PYTH["Pyth price updates<br/>verified on-chain"]
+  end
+  DB[("Supabase<br/>history for the UI")]
+  CEX["Deribit · OKX · Bybit · Binance"] --> PRC
+  LLM["Z.ai GLM 5.3 · Cloudflare Clef"] --> DESK
+  HERMES["Pyth Hermes"] --> KEEP
+  UI --> WAL -->|"create_plan, 1 signature"| PROG
+  UI -.->|"reads accounts"| PROG
+  UI -.->|"reads history"| DB
+  PRC --> DESK --> KEEP
+  KEEP -->|"open_round, post_sample, take_round"| PROG
+  KEEP --> DB
+  PROG <-->|"CPI"| LEND
+  PROG -->|"reads"| PYTH
+```
+
+- **App** makes the transaction. **Wallet** signs it. Nothing leaves the wallet without that signature.
+- **Program** is the referee: it checks every round against the limits the user signed, and only it can move collateral.
+- **Worker** is the staff: it prices, proposes, judges and sends transactions. If it dies, plans sit in Jupiter Lend: the owner can close them, and anyone can expire them after the deadline.
+- **Supabase** is a mirror for fast pages. The chain is the source of truth.
 
 | Layer | Choice | Why |
 |---|---|---|
@@ -128,7 +176,6 @@ worker/src/            pricer, keeper, sampler, makers, mirror, desk (Quant/Risk
 app/                   Next.js app: / /earn /plan/[id] /plans /desk /auctions /maker /pool, Blink route
 scripts/               devnet init, lookup table, pool, manual round opener, Pyth posting and checks
 supabase/migrations/   schema and RLS
-notes/ docs/           lane notes, devnet logs, AI design, pitch
 ```
 
 ## Run locally
@@ -137,20 +184,20 @@ Prerequisites: Node 25, pnpm 11, Rust 1.89, Anchor CLI 1.0.2, solana-cli, a devn
 
 Environment variable **names** (copy `.env.example` and `app/.env.example`; never commit values):
 
-- Worker / scripts: `HELIUS_RPC_URL`, `PROGRAM_ID`, `USDC_MINT`, `KEEPER_KEYPAIR`, `MAKER1_KEYPAIR`, `MAKER2_KEYPAIR`, `PYTH_HERMES_API_KEY`, `JUP_API_KEY`, `ZAI_API_KEY`, `ZAI_BASE_URL`, `ZAI_MODEL_MAIN`, `CF_ACCOUNT_ID`, `CF_AI_TOKEN`, `RISK_BACKEND`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `WORKER_SHARED_SECRET`, `QUICK_PLANS_ENABLED`, optional `HOST`, `PORT`, `MAKER_LLM`, `MAKER_STANCE_LEAD_SECS`, `INTAKE_ENABLED`
+- Worker / scripts: `HELIUS_RPC_URL`, `PROGRAM_ID`, `USDC_MINT`, `KEEPER_KEYPAIR`, `MAKER1_KEYPAIR`, `MAKER2_KEYPAIR`, `MAKER3_KEYPAIR`, `CLEF_LOCAL_URL`, `PYTH_HERMES_API_KEY`, `JUP_API_KEY`, `ZAI_API_KEY`, `ZAI_BASE_URL`, `ZAI_MODEL_MAIN`, `CF_ACCOUNT_ID`, `CF_AI_TOKEN`, `RISK_BACKEND`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `WORKER_SHARED_SECRET`, `QUICK_PLANS_ENABLED`, optional `HOST`, `PORT`, `MAKER_LLM`, `MAKER_STANCE_LEAD_SECS`, `INTAKE_ENABLED`
 - App: `NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_PROGRAM_ID`, `NEXT_PUBLIC_LEND_ALT`, `NEXT_PUBLIC_QUICK_PLANS_ENABLED`, `NEXT_PUBLIC_MAKER_BOTS`, `WORKER_URL`, `WORKER_SHARED_SECRET`, `HELIUS_RPC_URL`
 
 ```bash
 pnpm install
 pnpm build:program                   # anchor build
 scripts/dump-fixtures.sh             # once: dump devnet programs and accounts for LiteSVM
-pnpm test:program                    # 28 LiteSVM tests
-pnpm --filter @bide/worker test      # 196 worker tests
+pnpm test:program                    # 34 LiteSVM tests
+pnpm --filter @bide/worker test      # 200+ worker tests
 pnpm worker                          # all worker loops + HTTP on 127.0.0.1:8787
 pnpm app                             # Next.js on http://localhost:3000
 ```
 
-Apply the three migrations in `supabase/migrations/` before starting the worker; without them it falls back to an in-memory store and logs it. Without Z.ai or Cloudflare keys the desk fails closed (no rounds) and makers use the deterministic fallback. Run only one keeper at a time. VM deployment: [worker/DEPLOY.md](worker/DEPLOY.md).
+Apply the three migrations in `supabase/migrations/` before starting the worker; without them it falls back to an in-memory store and logs it. Without Z.ai or Cloudflare keys the desk fails closed (no rounds) and makers use the deterministic fallback. Run only one keeper at a time.
 
 ## Honest limits
 
@@ -174,4 +221,4 @@ Two external-style adversarial reviews ran on 6 Oct 2026, after an earlier Fable
 
 ## Pre-existing work
 
-None. Only planning documents (no code) existed before the hackathon kickoff on 4 Oct 2026. All code was written during TOKEN2049 Origins; see `git log`.
+None. Only planning documents (no code) existed before the hackathon kickoff on 4 Oct 2026. All code was written during TOKEN2049 Origins (built 4–7 Oct; the program landed in one large commit on 6 Oct, so `git log` is coarse).
