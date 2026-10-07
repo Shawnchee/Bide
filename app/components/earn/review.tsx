@@ -39,7 +39,7 @@ interface Props {
 export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spot, onBack }: Props) {
   const { state, run, retry } = useDeskPreview();
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signTransaction } = useWallet();
   const router = useRouter();
   const [stage, setStage] = useState<"idle" | "building" | "signing" | "confirming">("idle");
   const [txError, setTxError] = useState<string | null>(null);
@@ -140,11 +140,12 @@ export function Review({ goal, asset, draft, sentence, patience, horizonEnd, spo
     setStage("building");
     try {
       const tx = await buildCreatePlanTx(connection, publicKey, asset, draft);
-      const sig = await sendAndConfirm(connection, sendTransaction, tx, (s) => setStage(s));
+      const sig = await sendAndConfirm(connection, { sendTransaction, signTransaction }, tx, (s) => setStage(s));
       const plan = planPda(publicKey, draft.args.nonce)[0].toBase58();
       toast.success("Your plan is live", { description: `${lockLabel} moved into Jupiter Lend.` });
       router.push(`/plan/${plan}?sig=${sig}`);
     } catch (e) {
+      console.error("create_plan failed", e, (e as { logs?: string[] })?.logs);
       const { message, cancelled } = explainTxError(e);
       setStage("idle");
       if (!cancelled) setTxError(message);

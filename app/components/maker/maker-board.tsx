@@ -26,7 +26,7 @@ const isRateLimited = (e: unknown) => /429|too many requests|rate limit/i.test(e
 
 function AuctionCard({ r, now }: { r: DecodedRound; now: number }) {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signTransaction } = useWallet();
   const [busy, setBusy] = useState(false);
   const [won, setWon] = useState<string | null>(null);
   const price = auctionPrice(r, now);
@@ -40,7 +40,7 @@ function AuctionCard({ r, now }: { r: DecodedRound; now: number }) {
     setBusy(true);
     try {
       const tx = await buildTakeRoundTx(connection, publicKey, r);
-      const sig = await sendAndConfirm(connection, sendTransaction, tx);
+      const sig = await sendAndConfirm(connection, { sendTransaction, signTransaction }, tx);
       setWon(sig);
       toast.success("You won the auction");
     } catch (e) {

@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 
 export function PoolPanel() {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signTransaction } = useWallet();
   const program = useProgram();
   const client = program.status === "ready" ? program.client : null;
   const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
@@ -45,7 +45,7 @@ export function PoolPanel() {
               amount: toBaseUnits(n, mint === "USDC" ? 6 : 9),
             })
           : await buildPoolTx(connection, publicKey, { kind: "withdraw", shares: toBaseUnits(n, 6) });
-      const s = await sendAndConfirm(connection, sendTransaction, tx);
+      const s = await sendAndConfirm(connection, { sendTransaction, signTransaction }, tx);
       setSig(s);
       setNonce((x) => x + 1);
       toast.success(mode === "deposit" ? "Deposited" : "Withdrawn");

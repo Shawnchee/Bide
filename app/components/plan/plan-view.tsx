@@ -122,7 +122,7 @@ function Samples({ epoch }: { epoch: EpochRow | undefined }) {
 export function PlanView({ id, createSig }: { id: string; createSig: string | null }) {
   const now = useNow();
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signTransaction } = useWallet();
   const { dataConfigured } = useStatus();
   const program = useProgram();
   const client = program.status === "ready" ? program.client : null;
@@ -273,7 +273,7 @@ export function PlanView({ id, createSig }: { id: string; createSig: string | nu
     try {
       const pk = new PublicKey(id);
       const tx = kind === "pause" ? await buildPausePlanTx(connection, publicKey, pk, !paused) : await buildClosePlanTx(connection, publicKey, pk);
-      const sig = await sendAndConfirm(connection, sendTransaction, tx);
+      const sig = await sendAndConfirm(connection, { sendTransaction, signTransaction }, tx);
       toast.success(kind === "close" ? "Plan closed — funds returned" : paused ? "Plan resumed" : "Plan paused", {
         action: { label: "View", onClick: () => window.open(`https://explorer.solana.com/tx/${sig}?cluster=devnet`, "_blank") },
       });
