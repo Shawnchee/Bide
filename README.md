@@ -111,6 +111,19 @@ flowchart LR
 - **The premium is the main income.** The daily round [`5Ccf…dpcc`](https://explorer.solana.com/address/5CcfmgSseQNn8jQUWCDpBx1pJLrtzzj5ZLUCNbRydpcc?cluster=devnet) paid ≈ 0.54% of notional (after fee) for ~24 h, vs ≈ 0.011%/day for Lend at 4% APY. Quick (10-minute) rounds pay 0.001–0.12% of notional each.
 - **Totals** (snapshot): 25 paid rounds, $0.1465 to users after fee, $0.0163 in Bide fees. Live and current on `/auctions`.
 
+## What a round can pay (illustrative)
+
+A $100 "buy SOL at $112.60 by Nov 6" plan, one 9-day round. Assumed, not guaranteed: premium $0.75 (the live quote was $0.69–$0.80) and about 4% Lend APY (about $0.10 over 9 days). The premium is paid up front and the Lend yield is earned until settlement, whether or not the round fills.
+
+| Scenario | Fills? | Premium | Lend yield | Position after round | Net vs holding $100 USDC | Plain limit order, same case |
+|---|---|---|---|---|---|---|
+| SOL stays above $112.60 | No | +$0.75 | +$0.10 | $100 USDC, rolls into the next round | **+$0.85** | $0, still waiting |
+| SOL dips to about $110 at settlement | Yes | +$0.75 | +$0.10 | 0.8881 SOL, worth $97.69 | **-$1.46** | -$2.31 |
+| SOL crashes to $90 | Yes | +$0.75 | +$0.10 | 0.8881 SOL, worth $79.93 | **-$19.22** | -$20.07 |
+| SOL dips below $112.60, then rebounds to $125 | Yes | +$0.75 | +$0.10 | 0.8881 SOL, worth $111.01 | **+$11.86** | +$11.01 |
+
+After a fill the USDC has become SOL and stops earning Lend yield; if unfilled it keeps earning into the next round. Lend interest reaches the user on `close_plan` / `expire_plan`. Devnet Lend pays about $0, so the real devnet runs below show premium only.
+
 ## Evidence (devnet)
 
 All links are Solana Explorer on devnet. Every signature below was re-checked against devnet RPC.
