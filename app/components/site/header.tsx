@@ -8,6 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { cn } from "@/lib/utils";
 import { WalletButton } from "./wallet-button";
 import { ThemeToggle } from "./theme-toggle";
+import { Wordmark } from "./wordmark";
 
 const NAV = [
   { href: "/earn", label: "Earn" },
@@ -15,15 +16,6 @@ const NAV = [
   { href: "/desk", label: "Desk" },
   { href: "/auctions", label: "Auctions" },
 ];
-
-export function Wordmark({ className }: { className?: string }) {
-  return (
-    <span className={cn("inline-flex items-center gap-2 text-[17px] leading-none font-semibold tracking-[-0.03em]", className)}>
-      <span aria-hidden className="grid size-6 place-items-center rounded-md bg-primary text-[13px] font-bold text-primary-foreground">b</span>
-      Bide
-    </span>
-  );
-}
 
 export function SiteHeader() {
   const path = usePathname();
